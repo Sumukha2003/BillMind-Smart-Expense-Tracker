@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "267094691381",
+    "project_id": "bill-scanner-app-8dec4",
+    "storage_bucket": "bill-scanner-app-8dec4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:267094691381:android:468b8b46c56369f9b9eb7c",
+        "android_client_info": {
+          "package_name": "com.example.bill_scanner_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYZtmzl0X0OZNGaH0pm8JK9qo6ICeV9yc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
