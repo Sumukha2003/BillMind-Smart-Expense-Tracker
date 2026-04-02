@@ -273,7 +273,7 @@ class ScannerScreen extends ConsumerWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  SizedBox(height: 10),
+                  const SizedBox(height: 10),
                   Text(
                     'OCR extracts the text and totals.',
                     style: TextStyle(color: secondaryTextColor),
