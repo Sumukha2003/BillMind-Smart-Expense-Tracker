@@ -137,18 +137,31 @@ class ScannerScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final surfaceColor = isDark ? const Color(0xFF151A18) : Colors.white;
+    final borderColor = isDark
+        ? const Color(0xFF2A3430)
+        : const Color(0xFFE4ECE8);
+    final secondaryTextColor = isDark
+        ? const Color(0xFFB6C2BD)
+        : const Color(0xFF5E6A66);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Scan Bill')),
       body: DecoratedBox(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFF4FBF8),
-              Color(0xFFFFFFFF),
-            ],
+            colors: isDark
+                ? const [
+                    Color(0xFF0A0A0A),
+                    Color(0xFF111715),
+                  ]
+                : const [
+                    Color(0xFFF4FBF8),
+                    Color(0xFFFFFFFF),
+                  ],
           ),
         ),
         child: ListView(
@@ -166,13 +179,15 @@ class ScannerScreen extends ConsumerWidget {
                     Color(0xFF146B59),
                   ],
                 ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1F1D9E75),
-                    blurRadius: 24,
-                    offset: Offset(0, 12),
-                  ),
-                ],
+                boxShadow: isDark
+                    ? const []
+                    : const [
+                        BoxShadow(
+                          color: Color(0x1F1D9E75),
+                          blurRadius: 24,
+                          offset: Offset(0, 12),
+                        ),
+                      ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -218,6 +233,7 @@ class ScannerScreen extends ConsumerWidget {
                   'Best for a fresh bill capture with the fastest OCR flow.',
               icon: Icons.camera_alt_rounded,
               accent: const Color(0xFF1D9E75),
+              isDark: isDark,
               onTap: () => scanAndProcess(context, ref),
             ),
             const SizedBox(height: 14),
@@ -226,6 +242,7 @@ class ScannerScreen extends ConsumerWidget {
               subtitle: 'Choose an existing receipt photo from your gallery.',
               icon: Icons.photo_library_rounded,
               accent: const Color(0xFF2F80ED),
+              isDark: isDark,
               onTap: () => pickImageFromGallery(context, ref),
             ),
             const SizedBox(height: 14),
@@ -235,20 +252,21 @@ class ScannerScreen extends ConsumerWidget {
                   'Import a PDF and extract the first page for OCR and AI parsing.',
               icon: Icons.picture_as_pdf_rounded,
               accent: const Color(0xFFD85A30),
+              isDark: isDark,
               onTap: () => pickPDF(context, ref),
             ),
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: surfaceColor,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: const Color(0xFFE4ECE8)),
+                border: Border.all(color: borderColor),
               ),
-              child: const Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'What happens next',
                     style: TextStyle(
                       fontSize: 16,
@@ -256,11 +274,20 @@ class ScannerScreen extends ConsumerWidget {
                     ),
                   ),
                   SizedBox(height: 10),
-                  Text('OCR extracts the text and totals.'),
-                  SizedBox(height: 6),
-                  Text('Gemini improves merchant, date, and category guesses.'),
-                  SizedBox(height: 6),
-                  Text('You review the result before saving and auto-uploading.'),
+                  Text(
+                    'OCR extracts the text and totals.',
+                    style: TextStyle(color: secondaryTextColor),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Gemini improves merchant, date, and category guesses.',
+                    style: TextStyle(color: secondaryTextColor),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'You review the result before saving and auto-uploading.',
+                    style: TextStyle(color: secondaryTextColor),
+                  ),
                 ],
               ),
             ),
@@ -276,6 +303,7 @@ class _ActionCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final Color accent;
+  final bool isDark;
   final VoidCallback onTap;
 
   const _ActionCard({
@@ -283,13 +311,25 @@ class _ActionCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.accent,
+    required this.isDark,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final surfaceColor = isDark ? const Color(0xFF151A18) : Colors.white;
+    final borderColor = isDark
+        ? const Color(0xFF2A3430)
+        : const Color(0xFFE6ECE8);
+    final secondaryTextColor = isDark
+        ? const Color(0xFFB6C2BD)
+        : const Color(0xFF5E6A66);
+    final arrowColor = isDark
+        ? const Color(0xFF8B9A95)
+        : const Color(0xFF97A6A1);
+
     return Material(
-      color: Colors.white,
+      color: surfaceColor,
       borderRadius: BorderRadius.circular(22),
       child: InkWell(
         onTap: onTap,
@@ -297,15 +337,18 @@ class _ActionCard extends StatelessWidget {
         child: Ink(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
+            color: surfaceColor,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0xFFE6ECE8)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0A101828),
-                blurRadius: 14,
-                offset: Offset(0, 6),
-              ),
-            ],
+            border: Border.all(color: borderColor),
+            boxShadow: isDark
+                ? const []
+                : const [
+                    BoxShadow(
+                      color: Color(0x0A101828),
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
           ),
           child: Row(
             children: [
@@ -333,8 +376,8 @@ class _ActionCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: const TextStyle(
-                        color: Color(0xFF5E6A66),
+                      style: TextStyle(
+                        color: secondaryTextColor,
                         height: 1.35,
                       ),
                     ),
@@ -342,9 +385,9 @@ class _ActionCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              const Icon(
+              Icon(
                 Icons.arrow_forward_rounded,
-                color: Color(0xFF97A6A1),
+                color: arrowColor,
               ),
             ],
           ),
