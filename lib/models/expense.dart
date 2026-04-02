@@ -4,40 +4,57 @@ part 'expense.g.dart';
 
 @HiveType(typeId: 0)
 class Expense extends HiveObject {
+  static const Map<String, int> categoryColors = {
+    'Food': 0xFF1D9E75,
+    'Grocery': 0xFF378ADD,
+    'Shopping': 0xFFD4537E,
+    'Education': 0xFF8E63CE,
+    'Utility': 0xFFBA7517,
+    'Medical': 0xFFD85A30,
+    'Health': 0xFFE06C75,
+    'Bills': 0xFFB07A10,
+    'Fuel': 0xFF4D7CFE,
+    'Transport': 0xFF7F77DD,
+    'Entertainment': 0xFF639922,
+    'Travel': 0xFF2B6CB0,
+    'General': 0xFF607D8B,
+    'Other': 0xFF888780,
+  };
 
   @HiveField(0)
-  late String id;
+  String id;
 
   @HiveField(1)
-  late String merchant;
+  String merchant;
 
   @HiveField(2)
-  late double amount;
+  double amount;
 
   @HiveField(3)
-  late String category;
+  String category;
 
   @HiveField(4)
-  late DateTime date;
+  DateTime date;
 
   @HiveField(5)
-  String? gstNumber;
+  String imagePath;
 
   @HiveField(6)
-  double? cgst;
+  String firebaseUrl;
+
+  // ✅ NEW FIELDS (SAFE ADDITIONS)
 
   @HiveField(7)
-  double? sgst;
+  String paymentMethod; // cash / upi / card
 
   @HiveField(8)
-  late List<String> items;
+  bool isDuplicate;
 
   @HiveField(9)
-  String? imagePath;
+  String vendorType; // grocery / food / travel
 
-  // For future (PDF support / source tracking)
   @HiveField(10)
-  String sourceType; // image / pdf
+  String month; // for analytics
 
   Expense({
     required this.id,
@@ -45,47 +62,14 @@ class Expense extends HiveObject {
     required this.amount,
     required this.category,
     required this.date,
-    this.gstNumber,
-    this.cgst,
-    this.sgst,
-    List<String>? items,
-    this.imagePath,
-    this.sourceType = "image",
-  }) {
-    this.items = items ?? [];
-  }
+    required this.imagePath,
+    this.firebaseUrl = '',
 
-  // Convert to Firebase Map
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'merchant': merchant,
-      'amount': amount,
-      'category': category,
-      'date': date.toIso8601String(),
-      'gstNumber': gstNumber,
-      'cgst': cgst ?? 0.0,
-      'sgst': sgst ?? 0.0,
-      'items': items,
-      'imagePath': imagePath,
-      'sourceType': sourceType,
-    };
-  }
-
-  // Create from Firebase Map
-  factory Expense.fromMap(Map<String, dynamic> map) {
-    return Expense(
-      id: map['id'] ?? '',
-      merchant: map['merchant'] ?? 'Unknown',
-      amount: (map['amount'] ?? 0).toDouble(),
-      category: map['category'] ?? 'Other',
-      date: DateTime.tryParse(map['date'] ?? '') ?? DateTime.now(),
-      gstNumber: map['gstNumber'],
-      cgst: (map['cgst'] ?? 0).toDouble(),
-      sgst: (map['sgst'] ?? 0).toDouble(),
-      items: List<String>.from(map['items'] ?? []),
-      imagePath: map['imagePath'],
-      sourceType: map['sourceType'] ?? 'image',
-    );
-  }
+    // ✅ DEFAULT VALUES (IMPORTANT for compatibility)
+    this.paymentMethod = 'Unknown',
+    this.isDuplicate = false,
+    this.vendorType = 'General',
+    String? month,
+  }) : month = month ??
+            "${date.month.toString().padLeft(2, '0')}-${date.year}";
 }

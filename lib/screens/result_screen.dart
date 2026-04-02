@@ -1,20 +1,28 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/expense.dart';
 import '../providers/expense_provider.dart';
+import '../services/duplicate_service.dart';
+import '../services/firebase_service.dart';
 
 class ResultScreen extends ConsumerStatefulWidget {
-  final Map<String, dynamic> parsedData;
   final String imagePath;
+  final String merchant;
+  final String amount;
+  final DateTime date;
+  final String category;
 
   const ResultScreen({
     super.key,
-    required this.parsedData,
     required this.imagePath,
+    required this.merchant,
+    required this.amount,
+    required this.date,
+    required this.category,
   });
 
   @override
@@ -22,38 +30,37 @@ class ResultScreen extends ConsumerStatefulWidget {
 }
 
 class _ResultScreenState extends ConsumerState<ResultScreen> {
+  static const _categories = [
+    'General',
+    'Food',
+    'Travel',
+    'Grocery',
+    'Education',
+    'Medical',
+    'Shopping',
+    'Utility',
+    'Transport',
+    'Entertainment',
+    'Other',
+  ];
+
   late TextEditingController _merchantCtrl;
   late TextEditingController _amountCtrl;
 
-  late String _selectedCategory;
-  late DateTime _selectedDate;
-
+  String _selectedCategory = 'General';
+  DateTime _selectedDate = DateTime.now();
   bool _isSaving = false;
-
-  static const categories = [
-    'Food', 'Grocery', 'Utility', 'Medical',
-    'Transport', 'Shopping', 'Entertainment', 'Other',
-  ];
 
   @override
   void initState() {
     super.initState();
 
-    _merchantCtrl =
-        TextEditingController(text: widget.parsedData['merchant'] ?? '');
-
-    _amountCtrl = TextEditingController(
-        text: (widget.parsedData['amount'] ?? 0.0).toStringAsFixed(2));
-
-    _selectedCategory = categories.contains(widget.parsedData['category'])
-        ? widget.parsedData['category']
-        : 'Other';
-
-    try {
-      _selectedDate = DateTime.parse(widget.parsedData['date'] ?? '');
-    } catch (_) {
-      _selectedDate = DateTime.now();
-    }
+    _merchantCtrl = TextEditingController(text: widget.merchant);
+    _amountCtrl = TextEditingController(text: widget.amount);
+    _selectedDate = widget.date;
+    _selectedCategory = _categories.contains(widget.category)
+        ? widget.category
+        : 'General';
   }
 
   @override
@@ -63,17 +70,8 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-    );
-
-    if (picked != null) {
-      setState(() => _selectedDate = picked);
-    }
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _save() async {
@@ -91,23 +89,46 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
 
     setState(() => _isSaving = true);
 
+    String vendorType = 'General';
+    final merchantLower = _merchantCtrl.text.toLowerCase();
+
+    if (merchantLower.contains('hotel') ||
+        merchantLower.contains('restaurant')) {
+      vendorType = 'Food';
+    } else if (merchantLower.contains('mart') ||
+        merchantLower.contains('store')) {
+      vendorType = 'Grocery';
+    }
+
     final expense = Expense(
       id: const Uuid().v4(),
       merchant: _merchantCtrl.text.trim(),
       amount: amount,
       category: _selectedCategory,
       date: _selectedDate,
-      gstNumber: widget.parsedData['gst_number']?.toString(),
-      cgst: (widget.parsedData['cgst'] as num?)?.toDouble(),
-      sgst: (widget.parsedData['sgst'] as num?)?.toDouble(),
-      items: List<String>.from(widget.parsedData['items'] ?? []),
       imagePath: widget.imagePath,
+      paymentMethod: 'UPI',
+      isDuplicate: false,
+      vendorType: vendorType,
     );
+
+    if (DuplicateService.isDuplicate(expense)) {
+      setState(() => _isSaving = false);
+      _snack('Duplicate bill detected');
+      return;
+    }
 
     await ref.read(expenseNotifierProvider.notifier).addExpense(expense);
 
+    try {
+      final url = await FirebaseService.uploadImage(File(widget.imagePath));
+      expense.firebaseUrl = url;
+      await expense.save();
+      await FirebaseService.uploadExpense(expense);
+    } catch (_) {}
+
     if (mounted) {
-      Navigator.popUntil(context, (r) => r.isFirst);
+      Navigator.popUntil(context, (route) => route.isFirst);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -118,155 +139,290 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     }
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
     );
+
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final amount =
-        double.tryParse(_amountCtrl.text) ?? 0.0;
-
-    final items = List<String>.from(widget.parsedData['items'] ?? []);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final surfaceColor = isDark ? const Color(0xFF151A18) : Colors.white;
+    final subtleSurfaceColor = isDark
+        ? const Color(0xFF101513)
+        : const Color(0xFFF9FCFB);
+    final borderColor = isDark
+        ? const Color(0xFF2A3430)
+        : const Color(0xFFE3ECE7);
+    final secondaryTextColor = isDark
+        ? const Color(0xFFB6C2BD)
+        : const Color(0xFF61706B);
+    final amountPreview = double.tryParse(_amountCtrl.text) ?? 0.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
-
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text("Review Bill"),
-        actions: [
-          TextButton(
-            onPressed: _isSaving ? null : _save,
-            child: const Text("Save"),
-          )
-        ],
-      ),
-
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-
-            // 📷 IMAGE PREVIEW
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(widget.imagePath),
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
+      appBar: AppBar(title: const Text('Confirm Expense')),
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isDark
+                ? const [
+                    Color(0xFF0A0A0A),
+                    Color(0xFF111715),
+                  ]
+                : const [
+                    Color(0xFFF4FBF8),
+                    Color(0xFFFFFFFF),
+                  ],
+          ),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: isDark
+                      ? const []
+                      : const [
+                          BoxShadow(
+                            color: Color(0x14101A18),
+                            blurRadius: 24,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
+                ),
+                child: Column(
+                  children: [
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(28),
+                      ),
+                      child: Image.file(
+                        File(widget.imagePath),
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 54,
+                            height: 54,
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF1D9E75,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(
+                              Icons.receipt_long_rounded,
+                              color: Color(0xFF1D9E75),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Review before saving',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _merchantCtrl.text.trim().isEmpty
+                                      ? 'Unrecognized merchant'
+                                      : _merchantCtrl.text.trim(),
+                                  style: TextStyle(
+                                    color: secondaryTextColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            'Rs ${amountPreview.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1D9E75),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // 💰 BIG AMOUNT DISPLAY
-            Center(
-              child: Column(
-                children: [
-                  const Text("Total Amount",
-                      style: TextStyle(color: Colors.grey)),
-
-                  const SizedBox(height: 6),
-
-                  Text(
-                    "₹ ${amount.toStringAsFixed(2)}",
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1D9E75),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Bill details',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _merchantCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Merchant',
+                        prefixIcon: Icon(Icons.storefront_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _amountCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Amount',
+                        prefixIcon: Icon(Icons.currency_rupee),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedCategory,
+                      items: _categories
+                          .map(
+                            (category) => DropdownMenuItem(
+                              value: category,
+                              child: Text(category),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() => _selectedCategory = val);
+                        }
+                      },
+                      decoration: const InputDecoration(
+                        labelText: 'Category',
+                        prefixIcon: Icon(Icons.category_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: subtleSurfaceColor,
+                        border: Border.all(color: borderColor),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: ListTile(
+                        title: Text(
+                          'Bill date',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: secondaryTextColor,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _selectedDate.toLocal().toString().split(' ')[0],
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.calendar_today),
+                          onPressed: _pickDate,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: borderColor),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Save flow',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'The expense is saved locally first so your monthly analytics refresh immediately.',
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'After that, the bill image and metadata are uploaded to Firebase automatically.',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isSaving ? null : _save,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: const Color(0xFF1D9E75),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // 🧾 DETAILS CARD
-            _card([
-              _field("Merchant", _merchantCtrl),
-              _divider(),
-              _field("Amount", _amountCtrl),
-              _divider(),
-              _dateRow(),
-              _divider(),
-              _categoryRow(),
-            ]),
-
-            // 📦 ITEMS
-            if (items.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const Text("Items"),
-
-              const SizedBox(height: 10),
-
-              _card(
-                items
-                    .map((e) => Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(e),
-                        ))
-                    .toList(),
+                  child: _isSaving
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          'Save Expense',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
               ),
             ],
-
-            const SizedBox(height: 80),
-          ],
-        ),
-      ),
-
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ElevatedButton(
-          onPressed: _isSaving ? null : _save,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1D9E75),
-            minimumSize: const Size.fromHeight(50),
           ),
-          child: const Text("Save Expense"),
         ),
       ),
     );
   }
-
-  Widget _field(String label, TextEditingController ctrl) => Padding(
-        padding: const EdgeInsets.all(12),
-        child: TextField(
-          controller: ctrl,
-          decoration: InputDecoration(labelText: label),
-        ),
-      );
-
-  Widget _dateRow() => ListTile(
-        title: Text(DateFormat('dd MMM yyyy').format(_selectedDate)),
-        trailing: const Icon(Icons.calendar_today),
-        onTap: _pickDate,
-      );
-
-  Widget _categoryRow() => Padding(
-        padding: const EdgeInsets.all(12),
-        child: DropdownButtonFormField<String>(
-          initialValue: _selectedCategory,
-          items: categories
-              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-              .toList(),
-          onChanged: (val) => setState(() => _selectedCategory = val!),
-        ),
-      );
-
-  Widget _card(List<Widget> children) => Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(children: children),
-      );
-
-  Widget _divider() => const Divider(height: 1);
 }

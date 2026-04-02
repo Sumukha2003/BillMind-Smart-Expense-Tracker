@@ -1,57 +1,75 @@
 name: bill_scanner_app
-description: Bill Scanner + Expense Tracker using OCR and Gemini AI
+description: A smart bill scanner and expense tracker app
+
 publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: ">=3.2.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
-  firebase_core: ^3.6.0
-  cloud_firestore: ^5.4.4
+  google_generative_ai: ^0.4.3
+  permission_handler: ^11.3.1
+  timezone: ^0.9.2
+  
+  # UI
+  cupertino_icons: ^1.0.8
 
-  file_picker: ^8.0.0
-  image_picker: ^1.0.7
+  # State Management
+  flutter_riverpod: ^2.5.1
 
-  google_mlkit_text_recognition: ^0.11.0
-  google_generative_ai: ^0.4.0
-
+  # Local Database
   hive: ^2.2.3
   hive_flutter: ^1.1.0
 
-  flutter_riverpod: ^2.5.1
+  # Env Variables
+  flutter_dotenv: ^5.1.0
 
+  # Charts
   fl_chart: ^0.68.0
+
+  # Image Input
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+
+  # OCR
+  google_mlkit_text_recognition: ^0.13.0
+
+  # Firebase
+  firebase_core: ^2.30.0
+  firebase_storage: ^11.7.0
+  cloud_firestore: ^4.17.0
+
+  # Utils
   intl: ^0.19.0
+  uuid: ^4.4.0
 
-  path_provider: ^2.1.2
+  # PDF
+  
+  # File handling
+  file_picker: ^8.0.0
+  path_provider: ^2.1.3
 
-  flutter_local_notifications: ^17.2.4
-  permission_handler: ^11.4.0
-
-  flutter_dotenv: ^5.2.1
-
-  uuid: ^4.3.3
-
-  cupertino_icons: ^1.0.6
-
-  # 🔥 Correct PDF reader
-  syncfusion_flutter_pdf: ^28.1.33
-  syncfusion_flutter_pdfviewer: ^28.1.33
+  # Notifications
+  flutter_local_notifications: ^17.1.2
+  pdf_render_plus: 1.4.16
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  hive_generator: ^2.0.1
-  build_runner: ^2.4.13
-  flutter_lints: ^3.0.2
+  flutter_lints: ^3.0.0
 
+  # Code generation
+  build_runner: ^2.4.9
+  hive_generator: ^2.0.1
+
+  
 flutter:
   uses-material-design: true
-
   assets:
     - .env

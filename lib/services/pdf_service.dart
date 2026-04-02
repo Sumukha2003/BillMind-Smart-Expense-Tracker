@@ -1,30 +1,36 @@
 import 'dart:io';
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'dart:ui' as ui;
+import 'package:pdf_render_plus/pdf_render.dart';
 
-class PdfService {
-  Future<String> extractTextFromPdf(File pdfFile) async {
+class PDFService {
+  static Future<File?> convertFirstPageToImage(String path) async {
+    PdfDocument? doc;
+    PdfPageImage? pageImage;
+
     try {
-      final bytes = await pdfFile.readAsBytes();
-      final document = PdfDocument(inputBytes: bytes);
+      doc = await PdfDocument.openFile(path);
+      final page = await doc.getPage(1);
 
-      String text = '';
+      pageImage = await page.render(
+        width: page.width.toInt(),
+        height: page.height.toInt(),
+      );
 
-      for (int i = 0; i < document.pages.count; i++) {
-        final pageText = PdfTextExtractor(document)
-            .extractText(startPageIndex: i, endPageIndex: i);
-
-        text += "$pageText\n";
+      final image = await pageImage.createImageDetached();
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        return null;
       }
 
-      document.dispose();
+      final file = File('${path}_page1.png');
+      await file.writeAsBytes(byteData.buffer.asUint8List());
 
-      if (text.trim().isEmpty) {
-        throw Exception("No readable text in PDF");
-      }
-
-      return text;
+      return file;
     } catch (e) {
-      throw Exception("PDF text extraction failed: $e");
+      return null;
+    } finally {
+      pageImage?.dispose();
+      await doc?.dispose();
     }
   }
 }

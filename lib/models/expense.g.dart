@@ -22,12 +22,12 @@ class ExpenseAdapter extends TypeAdapter<Expense> {
       amount: fields[2] as double,
       category: fields[3] as String,
       date: fields[4] as DateTime,
-      gstNumber: fields[5] as String?,
-      cgst: fields[6] as double?,
-      sgst: fields[7] as double?,
-      items: (fields[8] as List?)?.cast<String>(),
-      imagePath: fields[9] as String?,
-      sourceType: fields[10] as String,
+      imagePath: fields[5] as String,
+      firebaseUrl: fields[6] as String,
+      paymentMethod: fields[7] as String,
+      isDuplicate: fields[8] as bool,
+      vendorType: fields[9] as String,
+      month: fields[10] as String?,
     );
   }
 
@@ -46,17 +46,17 @@ class ExpenseAdapter extends TypeAdapter<Expense> {
       ..writeByte(4)
       ..write(obj.date)
       ..writeByte(5)
-      ..write(obj.gstNumber)
-      ..writeByte(6)
-      ..write(obj.cgst)
-      ..writeByte(7)
-      ..write(obj.sgst)
-      ..writeByte(8)
-      ..write(obj.items)
-      ..writeByte(9)
       ..write(obj.imagePath)
+      ..writeByte(6)
+      ..write(obj.firebaseUrl)
+      ..writeByte(7)
+      ..write(obj.paymentMethod)
+      ..writeByte(8)
+      ..write(obj.isDuplicate)
+      ..writeByte(9)
+      ..write(obj.vendorType)
       ..writeByte(10)
-      ..write(obj.sourceType);
+      ..write(obj.month);
   }
 
   @override
