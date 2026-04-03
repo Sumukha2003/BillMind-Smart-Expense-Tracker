@@ -16,7 +16,11 @@ class OCRService {
     caseSensitive: false,
   );
   static final RegExp _keywordAmountRegex = RegExp(
-    r'(total amount|grand total|amount payable|net amount|net payable|final amount|total due|amount due|payable amount|invoice total|total)\D{0,16}((?:rs\.?|inr|\u20B9)?\s*\d[\d,]*(?:\.\d{1,2})?)',
+    r'(total amount after tax|invoice amount|bill amount|grand total|total amount|amount payable|net amount|net payable|final amount|total due|amount due|payable amount|invoice total|total)\D{0,20}((?:rs\.?|inr|\u20B9)?\s*\d[\d,]*(?:\.\d{1,2})?)',
+    caseSensitive: false,
+  );
+  static final RegExp _preferredAmountRegex = RegExp(
+    r'(total amount after tax|invoice amount|grand total|final amount|amount payable|net payable|net amount|invoice total)\D{0,24}((?:rs\.?|inr|\u20B9)?\s*\d[\d,]*(?:\.\d{1,2})?)',
     caseSensitive: false,
   );
   static final RegExp _strongTotalKeywordRegex = RegExp(
@@ -252,6 +256,7 @@ class OCRService {
   }) {
     final entries = _buildLineEntries(text, recognizedText);
     final keywordBoost = _extractKeywordHints(text);
+    final preferredValues = _extractPreferredAmountValues(text);
     final candidates = <_AmountCandidate>[];
     final strongKeywordCandidates = <_AmountCandidate>[];
 
@@ -310,8 +315,19 @@ class OCRService {
       }
     }
 
-    final activeCandidates =
-        strongKeywordCandidates.isNotEmpty ? strongKeywordCandidates : candidates;
+    final preferredCandidates = candidates
+        .where(
+          (candidate) => preferredValues.any(
+            (value) => (value - candidate.value).abs() < 0.01,
+          ),
+        )
+        .toList();
+
+    final activeCandidates = preferredCandidates.isNotEmpty
+        ? preferredCandidates
+        : (strongKeywordCandidates.isNotEmpty
+              ? strongKeywordCandidates
+              : candidates);
 
     if (activeCandidates.isEmpty) {
       return const AmountExtractionResult(
@@ -432,6 +448,29 @@ class OCRService {
     }
 
     return hints;
+  }
+
+  static List<double> _extractPreferredAmountValues(String text) {
+    final values = <double>[];
+
+    for (final match in _preferredAmountRegex.allMatches(text)) {
+      final rawValue = match.group(2);
+      if (rawValue == null) {
+        continue;
+      }
+
+      final value = _parseAmount(rawValue);
+      if (value == null) {
+        continue;
+      }
+
+      final alreadyPresent = values.any((item) => (item - value).abs() < 0.01);
+      if (!alreadyPresent) {
+        values.add(value);
+      }
+    }
+
+    return values;
   }
 
   static int _scoreCandidate({
@@ -921,6 +960,9 @@ class OCRService {
         .toList();
 
     const blockedWords = [
+      'insert',
+      'insert logo',
+      'logo',
       'tax invoice',
       'invoice',
       'bill',
@@ -929,6 +971,9 @@ class OCRService {
       'completed successfully',
       'transaction information',
       'uploaded successfully',
+      'thank you',
+      'visit again',
+      'composition dealer',
       'gst',
       'phone',
       'mobile',
@@ -946,6 +991,10 @@ class OCRService {
         continue;
       }
       if (blockedWords.any(lower.contains)) {
+        continue;
+      }
+      if (RegExp(r'^(name|address|location|remarks|customer|supplier)\b')
+          .hasMatch(lower)) {
         continue;
       }
       if (RegExp(r'\d{4,}').hasMatch(normalized)) {

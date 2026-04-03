@@ -128,7 +128,7 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
       vendorType: vendorType,
     );
 
-    if (DuplicateService.isDuplicate(expense)) {
+    if (await DuplicateService.isDuplicate(expense)) {
       setState(() => _isSaving = false);
       _snack('Duplicate bill detected');
       return;

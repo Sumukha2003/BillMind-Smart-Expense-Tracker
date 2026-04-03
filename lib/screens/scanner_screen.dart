@@ -89,7 +89,8 @@ class ScannerScreen extends ConsumerWidget {
         imagePath: file.path,
       );
 
-      if (DuplicateService.isDuplicate(previewExpense) && context.mounted) {
+      if (await DuplicateService.isDuplicate(previewExpense) &&
+          context.mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('Possible duplicate bill detected')),
         );
