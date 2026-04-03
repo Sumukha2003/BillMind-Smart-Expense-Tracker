@@ -4,6 +4,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../models/expense.dart';
 import '../services/analytics_service.dart';
 
+const kYearFilterOptions = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
+
 //  Hive Box Provider
 final expenseBoxProvider = Provider<Box<Expense>>((ref) {
   return Hive.box<Expense>('expenses');
@@ -40,13 +42,31 @@ final expenseNotifierProvider =
   return ExpenseNotifier(box);
 });
 
+final selectedYearProvider = StateProvider<int>((ref) {
+  final currentYear = DateTime.now().year;
+  if (kYearFilterOptions.contains(currentYear)) {
+    return currentYear;
+  }
+  return kYearFilterOptions.last;
+});
+
 // Monthly Expenses
 final monthlyExpensesProvider = Provider<List<Expense>>((ref) {
   final expenses = ref.watch(expenseNotifierProvider);
+  final selectedYear = ref.watch(selectedYearProvider);
   final now = DateTime.now();
 
   return expenses
-      .where((e) => e.date.month == now.month && e.date.year == now.year)
+      .where((e) => e.date.month == now.month && e.date.year == selectedYear)
+      .toList();
+});
+
+final selectedYearExpensesProvider = Provider<List<Expense>>((ref) {
+  final expenses = ref.watch(expenseNotifierProvider);
+  final selectedYear = ref.watch(selectedYearProvider);
+
+  return expenses
+      .where((e) => e.date.year == selectedYear)
       .toList();
 });
 
@@ -69,7 +89,7 @@ final categoryTotalsProvider = Provider<Map<String, double>>((ref) {
 });
 
 final allCategoryTotalsProvider = Provider<Map<String, double>>((ref) {
-  final expenses = ref.watch(expenseNotifierProvider);
+  final expenses = ref.watch(selectedYearExpensesProvider);
   final Map<String, double> totals = {};
 
   for (final expense in expenses) {
@@ -81,7 +101,7 @@ final allCategoryTotalsProvider = Provider<Map<String, double>>((ref) {
 
 // Advanced Analytics
 final insightsProvider = Provider<List<String>>((ref) {
-  final expenses = ref.watch(expenseNotifierProvider);
+  final expenses = ref.watch(selectedYearExpensesProvider);
   return AnalyticsService.generateInsights(expenses);
 });
 

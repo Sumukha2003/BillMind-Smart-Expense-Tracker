@@ -67,11 +67,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  Widget _yearDropdown({
+    required BuildContext context,
+    required bool isDark,
+    required int selectedYear,
+  }) {
+    final borderColor = isDark
+        ? const Color(0xFF2A3430)
+        : const Color(0xFFE3ECE7);
+    final fillColor = isDark ? const Color(0xFF151A18) : Colors.white;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      decoration: BoxDecoration(
+        color: fillColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          value: selectedYear,
+          borderRadius: BorderRadius.circular(16),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+          items: kYearFilterOptions
+              .map(
+                (year) => DropdownMenuItem<int>(
+                  value: year,
+                  child: Text(year.toString()),
+                ),
+              )
+              .toList(),
+          onChanged: (year) {
+            if (year != null) {
+              ref.read(selectedYearProvider.notifier).state = year;
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final selectedYear = ref.watch(selectedYearProvider);
     final allExpenses = ref.watch(expenseNotifierProvider);
     final surfaceColor = isDark ? const Color(0xFF151A18) : Colors.white;
     final subtleSurfaceColor = isDark
@@ -83,14 +124,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final secondaryTextColor = isDark
         ? const Color(0xFFB6C2BD)
         : const Color(0xFF6B7B76);
-
     final expenses = allExpenses.where((expense) {
       final matchesSearch = expense.merchant
           .toLowerCase()
           .contains(searchQuery.toLowerCase());
+      final matchesYear = expense.date.year == selectedYear;
       final matchesMonth = selectedMonth == 'All' ||
           DateFormat('MMM').format(expense.date) == selectedMonth;
-      return matchesSearch && matchesMonth;
+      return matchesSearch && matchesYear && matchesMonth;
     }).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
@@ -105,8 +146,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? 'General'
         : categoryTotals.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
     final overviewLabel = selectedMonth == 'All'
-        ? 'This year at a glance'
-        : 'This month at a glance';
+        ? '$selectedYear at a glance'
+        : '$selectedMonth $selectedYear';
 
     return Scaffold(
       appBar: AppBar(
@@ -259,6 +300,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_month_rounded,
+                      color: Color(0xFF1D9E75),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Year filter',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Switch between 2020 and 2026 to view totals and charts for that bill year.',
+                            style: TextStyle(color: secondaryTextColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _yearDropdown(
+                      context: context,
+                      isDark: isDark,
+                      selectedYear: selectedYear,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
               SizedBox(
                 height: 48,
                 child: ListView(
@@ -283,7 +367,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Category distribution for the currently filtered expenses.',
+                      'Category distribution for the selected month in $selectedYear.',
                       style: TextStyle(color: secondaryTextColor),
                     ),
                     const SizedBox(height: 12),

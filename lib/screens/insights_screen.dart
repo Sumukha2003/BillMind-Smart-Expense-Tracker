@@ -29,7 +29,8 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final insights = ref.watch(insightsProvider);
-    final expenses = ref.watch(expenseNotifierProvider);
+    final selectedYear = ref.watch(selectedYearProvider);
+    final expenses = ref.watch(selectedYearExpensesProvider);
     final categoryTotals = ref.watch(allCategoryTotalsProvider);
     final total = categoryTotals.values.fold(0.0, (a, b) => a + b);
     final entries = categoryTotals.entries.toList();
@@ -72,6 +73,83 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('Category Trends', style: _sectionTitleStyle),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: surfaceColor,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.filter_alt_rounded,
+                        color: Color(0xFF1D9E75),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Year filter',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Pie chart, trends, and totals update for the selected year.',
+                              style: TextStyle(color: secondaryTextColor),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF101513)
+                              : const Color(0xFFF9FCFB),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<int>(
+                            value: selectedYear,
+                            borderRadius: BorderRadius.circular(16),
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                            items: kYearFilterOptions
+                                .map(
+                                  (year) => DropdownMenuItem<int>(
+                                    value: year,
+                                    child: Text(year.toString()),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (year) {
+                              if (year != null) {
+                                ref.read(selectedYearProvider.notifier).state =
+                                    year;
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Showing expenses recorded for $selectedYear only.',
+                  style: TextStyle(color: secondaryTextColor),
+                ),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(16),

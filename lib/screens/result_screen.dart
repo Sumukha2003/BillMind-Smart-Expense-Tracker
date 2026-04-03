@@ -12,9 +12,14 @@ import '../services/firebase_service.dart';
 class ResultScreen extends ConsumerStatefulWidget {
   final String imagePath;
   final String merchant;
-  final String amount;
+  final double amount;
   final DateTime date;
   final String category;
+  final double amountConfidence;
+  final String amountConfidenceLabel;
+  final List<double> amountAlternatives;
+  final String? amountEvidence;
+  final List<String> amountReasons;
 
   const ResultScreen({
     super.key,
@@ -23,6 +28,11 @@ class ResultScreen extends ConsumerStatefulWidget {
     required this.amount,
     required this.date,
     required this.category,
+    required this.amountConfidence,
+    required this.amountConfidenceLabel,
+    required this.amountAlternatives,
+    required this.amountEvidence,
+    required this.amountReasons,
   });
 
   @override
@@ -56,7 +66,7 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
     super.initState();
 
     _merchantCtrl = TextEditingController(text: widget.merchant);
-    _amountCtrl = TextEditingController(text: widget.amount);
+    _amountCtrl = TextEditingController(text: widget.amount.toStringAsFixed(2));
     _selectedDate = widget.date;
     _selectedCategory = _categories.contains(widget.category)
         ? widget.category
@@ -167,6 +177,11 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
         ? const Color(0xFFB6C2BD)
         : const Color(0xFF61706B);
     final amountPreview = double.tryParse(_amountCtrl.text) ?? 0.0;
+    final confidenceColor = _confidenceColor(widget.amountConfidence);
+    final bestAlternative = widget.amountAlternatives.firstWhere(
+      (value) => (value - widget.amount).abs() > 0.01,
+      orElse: () => widget.amount,
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm Expense')),
@@ -270,6 +285,99 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                         ],
                       ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Color(0xFF1D9E75),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Detection quality',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: confidenceColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            widget.amountConfidenceLabel,
+                            style: TextStyle(
+                              color: confidenceColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Detected amount: Rs ${widget.amount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: confidenceColor,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Confidence score: ${(widget.amountConfidence * 100).round()}%',
+                      style: TextStyle(color: secondaryTextColor),
+                    ),
+                    if (widget.amountEvidence != null &&
+                        widget.amountEvidence!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Matched line: ${widget.amountEvidence}',
+                        style: TextStyle(color: secondaryTextColor),
+                      ),
+                    ],
+                    if (widget.amountConfidence < 0.55 &&
+                        (bestAlternative - widget.amount).abs() > 0.01) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Did you mean Rs ${bestAlternative.toStringAsFixed(2)}?',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFD85A30),
+                        ),
+                      ),
+                    ],
+                    if (widget.amountReasons.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      for (final reason in widget.amountReasons.take(3))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            reason,
+                            style: TextStyle(color: secondaryTextColor),
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -424,5 +532,15 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
         ),
       ),
     );
+  }
+
+  Color _confidenceColor(double confidence) {
+    if (confidence >= 0.8) {
+      return const Color(0xFF1D9E75);
+    }
+    if (confidence >= 0.55) {
+      return const Color(0xFFBA7517);
+    }
+    return const Color(0xFFD85A30);
   }
 }

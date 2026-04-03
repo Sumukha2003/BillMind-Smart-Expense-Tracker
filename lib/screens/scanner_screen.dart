@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/expense.dart';
@@ -63,28 +62,19 @@ class ScannerScreen extends ConsumerWidget {
     File file,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final ocrResult = await OCRService.analyzeBill(file);
+    final aiResult = await GeminiService().parseBill(ocrResult.text);
 
-    final compressedBytes = await FlutterImageCompress.compressWithFile(
-      file.path,
-      quality: 70,
+    final merchant = _pickMerchant(
+      aiMerchant: aiResult['merchant'],
+      ocrMerchant: ocrResult.merchant,
     );
-
-    if (compressedBytes != null) {
-      await file.writeAsBytes(compressedBytes);
-    }
-
-    final rawText = await OCRService.extractText(file);
-    final ocrAmount = OCRService.extractAmount(rawText);
-    final ocrDate = OCRService.extractDate(rawText);
-    final ocrMerchant = OCRService.extractMerchant(rawText);
-    final ocrCategory = OCRService.detectCategory(ocrMerchant);
-
-    final aiResult = await GeminiService().parseBill(rawText);
-
-    final merchant = _stringOrFallback(aiResult['merchant'], ocrMerchant);
-    final amount = _doubleOrFallback(aiResult['amount'], ocrAmount);
-    final date = _dateOrFallback(aiResult['date'], ocrDate);
-    final category = _stringOrFallback(aiResult['category'], ocrCategory);
+    final amount = _pickAmount(
+      ocrResult: ocrResult.amountResult,
+      aiAmount: aiResult['amount'],
+    );
+    final date = _dateOrFallback(aiResult['date'], ocrResult.date);
+    final category = _stringOrFallback(aiResult['category'], ocrResult.category);
 
     final previewExpense = Expense(
       id: 'preview',
@@ -109,12 +99,57 @@ class ScannerScreen extends ConsumerWidget {
         builder: (_) => ResultScreen(
           imagePath: file.path,
           merchant: merchant,
-          amount: amount.toStringAsFixed(2),
+          amount: amount,
           date: date,
           category: category,
+          amountConfidence: ocrResult.amountResult.confidence,
+          amountConfidenceLabel: ocrResult.amountResult.label,
+          amountAlternatives: ocrResult.amountResult.alternatives,
+          amountEvidence: ocrResult.amountResult.evidenceLine,
+          amountReasons: ocrResult.amountResult.reasons,
         ),
       ),
     );
+  }
+
+  String _pickMerchant({
+    required dynamic aiMerchant,
+    required String ocrMerchant,
+  }) {
+    final aiValue = _stringOrNull(aiMerchant);
+    if (aiValue == null) {
+      return ocrMerchant;
+    }
+
+    if (ocrMerchant == 'Unknown') {
+      return aiValue;
+    }
+
+    return aiValue.length >= ocrMerchant.length ? aiValue : ocrMerchant;
+  }
+
+  double _pickAmount({
+    required AmountExtractionResult ocrResult,
+    required dynamic aiAmount,
+  }) {
+    final aiValue = _doubleOrNull(aiAmount);
+    if (ocrResult.amount > 0 && ocrResult.confidence >= 0.55) {
+      return ocrResult.amount;
+    }
+
+    if (aiValue == null || aiValue <= 0) {
+      return ocrResult.amount;
+    }
+
+    final aiMatchesOcrAlternative = ocrResult.alternatives.any(
+      (candidate) => (candidate - aiValue).abs() < 1,
+    );
+
+    if (ocrResult.amount <= 0 || aiMatchesOcrAlternative) {
+      return aiValue;
+    }
+
+    return ocrResult.amount > 0 ? ocrResult.amount : aiValue;
   }
 
   String _stringOrFallback(dynamic value, String fallback) {
@@ -122,10 +157,18 @@ class ScannerScreen extends ConsumerWidget {
     return (text == null || text.isEmpty) ? fallback : text;
   }
 
-  double _doubleOrFallback(dynamic value, double fallback) {
+  String? _stringOrNull(dynamic value) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    return text;
+  }
+
+  double? _doubleOrNull(dynamic value) {
     if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value) ?? fallback;
-    return fallback;
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
   DateTime _dateOrFallback(dynamic value, DateTime fallback) {

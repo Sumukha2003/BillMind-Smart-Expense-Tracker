@@ -53,10 +53,12 @@ dependencies:
   # File handling
   file_picker: ^8.0.0
   path_provider: ^2.1.3
+  path: ^1.9.1
 
   # Notifications
   flutter_local_notifications: ^17.1.2
   pdf_render_plus: 1.4.16
+  image: ^4.8.0
 
 dev_dependencies:
   flutter_test:

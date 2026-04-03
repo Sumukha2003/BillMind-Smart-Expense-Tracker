@@ -4,6 +4,8 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
 
+import 'ocr_service.dart';
+
 class GeminiService {
   late final GenerativeModel _model;
 
@@ -81,32 +83,7 @@ $text
 
   //  STRONG TOTAL DETECTION
   double _extractTotal(String text) {
-    final lines = text.split('\n');
-
-    for (var line in lines.reversed) {
-      final lower = line.toLowerCase();
-
-      if (lower.contains('total') ||
-          lower.contains('grand') ||
-          lower.contains('amount')) {
-        final match =
-            RegExp(r'\d{1,3}(,\d{3})*(\.\d{2})?').firstMatch(line);
-
-        if (match != null) {
-          return double.parse(match.group(0)!.replaceAll(',', ''));
-        }
-      }
-    }
-
-    // fallback: max value
-    final values = RegExp(r'\d{1,3}(,\d{3})*(\.\d{2})?')
-        .allMatches(text)
-        .map((e) => double.parse(e.group(0)!.replaceAll(',', '')))
-        .toList();
-
-    if (values.isEmpty) return 0;
-    values.sort();
-    return values.last;
+    return OCRService.extractAmountDetails(text).amount;
   }
 
   // MERCHANT DETECTION
