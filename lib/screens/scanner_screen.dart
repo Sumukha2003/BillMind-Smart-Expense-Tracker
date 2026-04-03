@@ -73,22 +73,27 @@ class ScannerScreen extends ConsumerWidget {
       ocrResult: ocrResult.amountResult,
       aiAmount: aiResult['amount'],
     );
-    final date = _dateOrFallback(aiResult['date'], ocrResult.date);
+    final date = _pickDate(aiResult['date'], ocrResult.date);
     final category = _stringOrFallback(aiResult['category'], ocrResult.category);
 
-    final previewExpense = Expense(
-      id: 'preview',
-      merchant: merchant,
-      amount: amount,
-      category: category,
-      date: date,
-      imagePath: file.path,
-    );
-
-    if (DuplicateService.isDuplicate(previewExpense) && context.mounted) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Possible duplicate bill detected')),
+    if (date != null &&
+        amount > 0 &&
+        merchant.trim().isNotEmpty &&
+        merchant != 'Unknown') {
+      final previewExpense = Expense(
+        id: 'preview',
+        merchant: merchant,
+        amount: amount,
+        category: category,
+        date: date,
+        imagePath: file.path,
       );
+
+      if (DuplicateService.isDuplicate(previewExpense) && context.mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Possible duplicate bill detected')),
+        );
+      }
     }
 
     if (!context.mounted) return;
@@ -116,16 +121,31 @@ class ScannerScreen extends ConsumerWidget {
     required dynamic aiMerchant,
     required String ocrMerchant,
   }) {
-    final aiValue = _stringOrNull(aiMerchant);
+    final aiValue = _cleanMerchant(aiMerchant);
+    final ocrValue = _cleanMerchant(ocrMerchant);
+
+    if (ocrValue == null) {
+      return aiValue ?? 'Unknown';
+    }
     if (aiValue == null) {
-      return ocrMerchant;
+      return ocrValue;
     }
 
-    if (ocrMerchant == 'Unknown') {
-      return aiValue;
+    return aiValue.length >= ocrValue.length ? aiValue : ocrValue;
+  }
+
+  String? _cleanMerchant(dynamic value) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) {
+      return null;
     }
 
-    return aiValue.length >= ocrMerchant.length ? aiValue : ocrMerchant;
+    final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.toLowerCase() == 'unknown') {
+      return null;
+    }
+
+    return normalized;
   }
 
   double _pickAmount({
@@ -154,14 +174,15 @@ class ScannerScreen extends ConsumerWidget {
 
   String _stringOrFallback(dynamic value, String fallback) {
     final text = value?.toString().trim();
-    return (text == null || text.isEmpty) ? fallback : text;
-  }
-
-  String? _stringOrNull(dynamic value) {
-    final text = value?.toString().trim();
     if (text == null || text.isEmpty) {
-      return null;
+      return fallback;
     }
+
+    final lower = text.toLowerCase();
+    if (lower == 'unknown' || lower == 'other') {
+      return fallback;
+    }
+
     return text;
   }
 
@@ -171,10 +192,19 @@ class ScannerScreen extends ConsumerWidget {
     return null;
   }
 
-  DateTime _dateOrFallback(dynamic value, DateTime fallback) {
+  DateTime? _pickDate(dynamic aiValue, DateTime? ocrDate) {
+    final aiDate = _dateOrNull(aiValue);
+    if (ocrDate != null && aiDate != null) {
+      final difference = ocrDate.difference(aiDate).inDays.abs();
+      return difference <= 3 ? ocrDate : aiDate;
+    }
+    return aiDate ?? ocrDate;
+  }
+
+  DateTime? _dateOrNull(dynamic value) {
     if (value is DateTime) return value;
     if (value is String) return OCRService.extractDate(value);
-    return fallback;
+    return null;
   }
 
   @override

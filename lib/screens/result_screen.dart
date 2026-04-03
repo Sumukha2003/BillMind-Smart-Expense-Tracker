@@ -13,7 +13,7 @@ class ResultScreen extends ConsumerStatefulWidget {
   final String imagePath;
   final String merchant;
   final double amount;
-  final DateTime date;
+  final DateTime? date;
   final String category;
   final double amountConfidence;
   final String amountConfidenceLabel;
@@ -58,7 +58,7 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
   late TextEditingController _amountCtrl;
 
   String _selectedCategory = 'General';
-  DateTime _selectedDate = DateTime.now();
+  DateTime? _selectedDate;
   bool _isSaving = false;
 
   @override
@@ -87,8 +87,14 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
   Future<void> _save() async {
     final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
 
-    if (_merchantCtrl.text.trim().isEmpty) {
+    if (_merchantCtrl.text.trim().isEmpty ||
+        _merchantCtrl.text.trim().toLowerCase() == 'unknown') {
       _snack('Enter merchant name');
+      return;
+    }
+
+    if (_selectedDate == null) {
+      _snack('Pick the bill date');
       return;
     }
 
@@ -115,7 +121,7 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
       merchant: _merchantCtrl.text.trim(),
       amount: amount,
       category: _selectedCategory,
-      date: _selectedDate,
+      date: _selectedDate!,
       imagePath: widget.imagePath,
       paymentMethod: 'UPI',
       isDuplicate: false,
@@ -150,9 +156,10 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
   }
 
   Future<void> _pickDate() async {
+    final initialDate = _selectedDate ?? DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
+      initialDate: initialDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
@@ -264,7 +271,8 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  _merchantCtrl.text.trim().isEmpty
+                                  _merchantCtrl.text.trim().isEmpty ||
+                                          _merchantCtrl.text.trim() == 'Unknown'
                                       ? 'Unrecognized merchant'
                                       : _merchantCtrl.text.trim(),
                                   style: TextStyle(
@@ -460,7 +468,9 @@ class _ResultScreenState extends ConsumerState<ResultScreen> {
                           ),
                         ),
                         subtitle: Text(
-                          _selectedDate.toLocal().toString().split(' ')[0],
+                          _selectedDate == null
+                              ? 'Not detected'
+                              : _selectedDate!.toLocal().toString().split(' ')[0],
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
                             color: theme.colorScheme.onSurface,

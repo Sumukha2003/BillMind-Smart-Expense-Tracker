@@ -8,6 +8,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 class OCRService {
+  static final DateTime _minValidBillDate = DateTime(2020, 1, 1);
   static const _rupeeSymbol = '\u20B9';
   static const _currencyPattern = '(?:rs\\.?|inr|$_rupeeSymbol)?\\s*';
   static final RegExp _numberRegex = RegExp(
@@ -16,6 +17,10 @@ class OCRService {
   );
   static final RegExp _keywordAmountRegex = RegExp(
     r'(total amount|grand total|amount payable|net amount|net payable|final amount|total due|amount due|payable amount|invoice total|total)\D{0,16}((?:rs\.?|inr|\u20B9)?\s*\d[\d,]*(?:\.\d{1,2})?)',
+    caseSensitive: false,
+  );
+  static final RegExp _strongTotalKeywordRegex = RegExp(
+    r'\b(total amount after tax|invoice amount|grand total|total amount|invoice total|final amount|amount payable|net payable|net amount|amount due|total due|payable amount|total|amount)\b',
     caseSensitive: false,
   );
   static final RegExp _dateRegex = RegExp(
@@ -28,23 +33,36 @@ class OCRService {
   }
 
   static Future<BillAnalysisResult> analyzeBill(File file) async {
-    final preparedFile = await _prepareImageForOcr(file);
-    final recognizedText = await _recognizeText(preparedFile);
-    final text = recognizedText.text.trim();
-    final amountResult = extractAmountDetails(
-      text,
-      recognizedText: recognizedText,
-    );
-    final merchant = extractMerchant(text);
-    final date = extractDate(text);
+    File? preparedFile;
 
-    return BillAnalysisResult(
-      text: text,
-      amountResult: amountResult,
-      date: date,
-      merchant: merchant,
-      category: detectCategory(merchant),
-    );
+    try {
+      preparedFile = await _prepareImageForOcr(file);
+      final recognizedText = await _recognizeBestText(
+        originalFile: file,
+        preparedFile: preparedFile,
+      );
+      final text = recognizedText.text.trim();
+      final amountResult = extractAmountDetails(
+        text,
+        recognizedText: recognizedText,
+      );
+      final merchant = extractMerchant(text);
+      final date = extractDate(text);
+
+      return BillAnalysisResult(
+        text: text,
+        amountResult: amountResult,
+        date: date,
+        merchant: merchant,
+        category: detectCategory(merchant, text: text),
+      );
+    } finally {
+      if (preparedFile != null && preparedFile.path != file.path) {
+        try {
+          await preparedFile.delete();
+        } catch (_) {}
+      }
+    }
   }
 
   static Future<Map<String, dynamic>> processBill(File file) async {
@@ -71,6 +89,22 @@ class OCRService {
     } finally {
       await textRecognizer.close();
     }
+  }
+
+  static Future<RecognizedText> _recognizeBestText({
+    required File originalFile,
+    required File preparedFile,
+  }) async {
+    final originalResult = await _recognizeText(originalFile);
+    if (preparedFile.path == originalFile.path) {
+      return originalResult;
+    }
+
+    final preparedResult = await _recognizeText(preparedFile);
+    final originalScore = _recognizedTextQualityScore(originalResult);
+    final preparedScore = _recognizedTextQualityScore(preparedResult);
+
+    return preparedScore > originalScore ? preparedResult : originalResult;
   }
 
   static Future<File> _prepareImageForOcr(File file) async {
@@ -181,6 +215,37 @@ class OCRService {
     return (total / count).round().clamp(135, 205);
   }
 
+  static int _recognizedTextQualityScore(RecognizedText recognizedText) {
+    final text = recognizedText.text.trim();
+    if (text.isEmpty) {
+      return 0;
+    }
+
+    final lines = text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final amount = extractAmountDetails(text, recognizedText: recognizedText);
+    final merchant = extractMerchant(text);
+    final date = extractDate(text);
+
+    var score = math.min(text.length, 240);
+    score += math.min(lines.length * 12, 120);
+
+    if (amount.amount > 0) {
+      score += 120 + (amount.confidence * 60).round();
+    }
+    if (merchant != 'Unknown') {
+      score += 50;
+    }
+    if (date != null) {
+      score += 40;
+    }
+
+    return score;
+  }
+
   static AmountExtractionResult extractAmountDetails(
     String text, {
     RecognizedText? recognizedText,
@@ -188,6 +253,7 @@ class OCRService {
     final entries = _buildLineEntries(text, recognizedText);
     final keywordBoost = _extractKeywordHints(text);
     final candidates = <_AmountCandidate>[];
+    final strongKeywordCandidates = <_AmountCandidate>[];
 
     for (final entry in entries) {
       if (_shouldSkipLine(entry.text)) {
@@ -204,8 +270,12 @@ class OCRService {
         if (value == null || value < 10) {
           continue;
         }
+        if (_looksLikeIdentifierNumber(entry.text, rawMatch, value)) {
+          continue;
+        }
 
         if (_looksLikeDate(entry.text, rawMatch) ||
+            _looksLikeYearOrDateFragment(entry.text, rawMatch, value) ||
             _looksLikeReference(entry.text)) {
           continue;
         }
@@ -221,23 +291,29 @@ class OCRService {
           continue;
         }
 
-        candidates.add(
-          _AmountCandidate(
-            value: value,
-            score: score,
-            lineText: entry.text,
-            reasons: _buildReasons(
-              entry.text,
-              rawMatch,
-              value,
-              entry.positionRatio,
-            ),
+        final candidate = _AmountCandidate(
+          value: value,
+          score: score,
+          lineText: entry.text,
+          reasons: _buildReasons(
+            entry.text,
+            rawMatch,
+            value,
+            entry.positionRatio,
           ),
         );
+        candidates.add(candidate);
+
+        if (_hasStrongTotalKeyword(entry.text)) {
+          strongKeywordCandidates.add(candidate);
+        }
       }
     }
 
-    if (candidates.isEmpty) {
+    final activeCandidates =
+        strongKeywordCandidates.isNotEmpty ? strongKeywordCandidates : candidates;
+
+    if (activeCandidates.isEmpty) {
       return const AmountExtractionResult(
         amount: 0,
         confidence: 0,
@@ -246,7 +322,7 @@ class OCRService {
       );
     }
 
-    candidates.sort((a, b) {
+    activeCandidates.sort((a, b) {
       final scoreComparison = b.score.compareTo(a.score);
       if (scoreComparison != 0) {
         return scoreComparison;
@@ -254,11 +330,11 @@ class OCRService {
       return b.value.compareTo(a.value);
     });
 
-    final best = candidates.first;
-    final secondBest = candidates.length > 1 ? candidates[1] : null;
+    final best = activeCandidates.first;
+    final secondBest = activeCandidates.length > 1 ? activeCandidates[1] : null;
     final topDistinct = <double>[];
 
-    for (final candidate in candidates) {
+    for (final candidate in activeCandidates) {
       final alreadyPresent = topDistinct.any(
         (value) => (value - candidate.value).abs() < 0.01,
       );
@@ -380,12 +456,19 @@ class OCRService {
       score += 16;
     }
 
+    final keywordMatches = _strongTotalKeywordRegex.allMatches(line).length;
+    score += keywordMatches * 18;
+
+    if (line.contains('total amount after tax')) score += 110;
+    if (line.contains('invoice amount')) score += 95;
     if (line.contains('grand total')) score += 65;
     if (line.contains('total amount')) score += 60;
     if (line.contains('amount payable')) score += 58;
     if (line.contains('net payable')) score += 55;
     if (line.contains('net amount')) score += 50;
     if (line.contains('final amount')) score += 50;
+    if (line.contains('bill amount')) score += 44;
+    if (line.contains('amount due')) score += 42;
     if (line.contains('total')) score += 40;
     if (line.contains('grand')) score += 24;
     if (line.contains('amount')) score += 18;
@@ -394,6 +477,19 @@ class OCRService {
     if (line.contains('balance')) score += 10;
 
     if (line.contains('subtotal')) score -= 28;
+    if (line.contains('sub total')) score -= 28;
+    if (line.contains('taxable')) score -= 75;
+    if (line.contains('taxable amount')) score -= 90;
+    if (line.contains('taxable amt')) score -= 90;
+    if (line.contains('base amount')) score -= 55;
+    if (line.contains('basic amount')) score -= 55;
+    if (line.contains('gross amount')) score -= 35;
+    if (line.contains('gross total')) score -= 22;
+    if (line.contains('before tax')) score -= 60;
+    if (line.contains('before gst')) score -= 60;
+    if (line.contains('pre-tax')) score -= 60;
+    if (line.contains('pre tax')) score -= 60;
+    if (line.contains('assessable')) score -= 65;
     if (line.contains('tax')) score -= 40;
     if (line.contains('cgst')) score -= 45;
     if (line.contains('sgst')) score -= 45;
@@ -417,14 +513,51 @@ class OCRService {
       score += 12;
     }
 
+    if (_isLikelyDateLine(line)) {
+      score -= 90;
+    }
+    if (_isYearLikeValue(value, rawValue)) {
+      score -= 120;
+    }
+    if (_looksLikeIdentifierNumber(entry.text, rawValue, value)) {
+      score -= 200;
+    }
+
     score += math.min((value / 1500).floor(), 25);
     score += keywordBoost ?? 0;
 
     if (entry.text.length <= 40) {
       score += 4;
     }
+    if (_strongTotalKeywordRegex.hasMatch(line)) {
+      score += 12;
+    }
 
     return score;
+  }
+
+  static bool _hasStrongTotalKeyword(String line) {
+    final lower = line.toLowerCase();
+    if (lower.contains('taxable amount') ||
+        lower.contains('taxable amt') ||
+        lower.contains('taxable')) {
+      return false;
+    }
+
+    return lower.contains('total amount after tax') ||
+        lower.contains('invoice amount') ||
+        lower.contains('grand total') ||
+        lower.contains('total amount') ||
+        lower.contains('invoice total') ||
+        lower.contains('final amount') ||
+        lower.contains('amount payable') ||
+        lower.contains('net payable') ||
+        lower.contains('net amount') ||
+        lower.contains('amount due') ||
+        lower.contains('total due') ||
+        lower.contains('payable amount') ||
+        lower.contains('total') ||
+        lower.contains('amount');
   }
 
   static bool _shouldSkipLine(String line) {
@@ -436,6 +569,9 @@ class OCRService {
     if (lower.contains('phone') || lower.contains('mobile')) {
       return true;
     }
+    if (lower.contains('gstin') || lower.contains('hsn')) {
+      return true;
+    }
 
     return false;
   }
@@ -445,6 +581,34 @@ class OCRService {
       final compactRaw = rawValue.replaceAll(RegExp(r'[^\d]'), '');
       final compactLine = line.replaceAll(RegExp(r'[^\d/]'), '');
       if (compactRaw.length >= 6 && compactLine.contains(compactRaw)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static bool _looksLikeYearOrDateFragment(
+    String line,
+    String rawValue,
+    double value,
+  ) {
+    final lower = line.toLowerCase();
+    final digits = rawValue.replaceAll(RegExp(r'[^\d]'), '');
+
+    if (_isYearLikeValue(value, rawValue) && _isLikelyDateLine(lower)) {
+      return true;
+    }
+
+    if ((lower.contains('/') || lower.contains('-')) &&
+        digits.length <= 4 &&
+        _isLikelyDateLine(lower)) {
+      return true;
+    }
+
+    if (digits.length == 6 || digits.length == 8) {
+      final parsed = _parseCompactDateDigits(digits);
+      if (parsed != null && _isLikelyDateLine(lower)) {
         return true;
       }
     }
@@ -464,6 +628,13 @@ class OCRService {
       'reference',
       'txn',
       'transaction',
+      'account',
+      'account no',
+      'account number',
+      'a/c',
+      'a/c no',
+      'acc no',
+      'bank account',
       'order id',
       'gstin',
       'hsn',
@@ -479,6 +650,153 @@ class OCRService {
         lower.contains('payable');
 
     return hasMarker && !hasTotalWord;
+  }
+
+  static bool _looksLikeIdentifierNumber(
+    String line,
+    String rawValue,
+    double value,
+  ) {
+    final lower = line.toLowerCase();
+    final digits = rawValue.replaceAll(RegExp(r'[^\d]'), '');
+    final hasDecimal = rawValue.contains('.');
+    final hasCurrency = rawValue.contains(_rupeeSymbol) ||
+        lower.contains(_rupeeSymbol) ||
+        lower.contains('rs.') ||
+        lower.contains('rs ') ||
+        lower.contains('inr');
+    final hasReferenceLabel = RegExp(
+      r'\b(account|account no|account number|a/c|acc no|ref|reference|txn|transaction|id|no\.?|number)\b',
+      caseSensitive: false,
+    ).hasMatch(lower);
+    final hasIdentifierSeparators =
+        line.contains('_') || line.contains(':') || line.contains('#');
+    final lineDigits = line.replaceAll(RegExp(r'[^\d]'), '');
+    final hasMixedAlphaNumeric = RegExp(
+      r'(?=.*[a-zA-Z])(?=.*\d)',
+    ).hasMatch(line);
+    final hasManyDigitGroups =
+        RegExp(r'\d').allMatches(line).length >= 10 && !hasCurrency;
+
+    if (digits.length >= 9 && !hasDecimal && !hasCurrency) {
+      return true;
+    }
+
+    if (hasReferenceLabel && digits.length >= 6 && !hasDecimal) {
+      return true;
+    }
+
+    if (hasIdentifierSeparators && digits.length >= 6 && !hasDecimal) {
+      return true;
+    }
+
+    if (hasMixedAlphaNumeric && lineDigits.length >= 8 && !hasCurrency) {
+      return true;
+    }
+
+    if (hasManyDigitGroups && !_hasStrongTotalKeyword(line)) {
+      return true;
+    }
+
+    if (value >= 10000000 && !hasCurrency && !lower.contains('total')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  static bool _isLikelyDateLine(String lowerLine) {
+    const dateWords = [
+      'date',
+      'dated',
+      'invoice date',
+      'bill date',
+      'receipt date',
+      'txn date',
+      'transaction date',
+      'time',
+      'year',
+      'fy',
+      'period',
+    ];
+
+    final hasDateWord = dateWords.any(lowerLine.contains);
+    final hasDateSeparator = lowerLine.contains('/') || lowerLine.contains('-');
+    final hasMonthName = RegExp(
+      r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b',
+      caseSensitive: false,
+    ).hasMatch(lowerLine);
+
+    return hasDateWord || hasDateSeparator || hasMonthName;
+  }
+
+  static bool _isYearLikeValue(double value, String rawValue) {
+    final digits = rawValue.replaceAll(RegExp(r'[^\d]'), '');
+    if (digits.length != 4) {
+      return false;
+    }
+
+    final numeric = int.tryParse(digits);
+    if (numeric == null) {
+      return false;
+    }
+
+    return numeric >= 2000 && numeric <= 2099 && value == numeric.toDouble();
+  }
+
+  static DateTime? _parseCompactDateDigits(String digits) {
+    final currentYear = DateTime.now().year;
+
+    if (digits.length == 8) {
+      final yyyy = int.tryParse(digits.substring(0, 4));
+      final mm = int.tryParse(digits.substring(4, 6));
+      final dd = int.tryParse(digits.substring(6, 8));
+      if (_looksLikeValidDateParts(yyyy, mm, dd, currentYear)) {
+        return DateTime(yyyy!, mm!, dd!);
+      }
+
+      final dd2 = int.tryParse(digits.substring(0, 2));
+      final mm2 = int.tryParse(digits.substring(2, 4));
+      final yyyy2 = int.tryParse(digits.substring(4, 8));
+      if (_looksLikeValidDateParts(yyyy2, mm2, dd2, currentYear)) {
+        return DateTime(yyyy2!, mm2!, dd2!);
+      }
+    }
+
+    if (digits.length == 6) {
+      final dd = int.tryParse(digits.substring(0, 2));
+      final mm = int.tryParse(digits.substring(2, 4));
+      final yy = int.tryParse(digits.substring(4, 6));
+      final yyyy = yy == null ? null : 2000 + yy;
+      if (_looksLikeValidDateParts(yyyy, mm, dd, currentYear)) {
+        return DateTime(yyyy!, mm!, dd!);
+      }
+    }
+
+    return null;
+  }
+
+  static bool _looksLikeValidDateParts(
+    int? year,
+    int? month,
+    int? day,
+    int currentYear,
+  ) {
+    if (year == null || month == null || day == null) {
+      return false;
+    }
+
+    if (year < 2000 || year > currentYear + 1) {
+      return false;
+    }
+    if (month < 1 || month > 12) {
+      return false;
+    }
+    if (day < 1 || day > 31) {
+      return false;
+    }
+
+    return true;
   }
 
   static double? _parseAmount(String raw) {
@@ -520,6 +838,25 @@ class OCRService {
     final reasons = <String>[];
     final lower = line.toLowerCase();
 
+    if (lower.contains('total amount after tax')) {
+      reasons.add('Matched total amount after tax keyword');
+    } else if (lower.contains('invoice amount')) {
+      reasons.add('Matched invoice amount keyword');
+    } else if (lower.contains('grand total')) {
+      reasons.add('Matched grand total keyword');
+    } else if (lower.contains('total amount')) {
+      reasons.add('Matched total amount keyword');
+    } else if (lower.contains('amount payable')) {
+      reasons.add('Matched amount payable keyword');
+    } else if (lower.contains('final amount')) {
+      reasons.add('Matched final amount keyword');
+    } else if (lower.contains('net amount') || lower.contains('net payable')) {
+      reasons.add('Matched net total keyword');
+    } else if (lower.contains('total')) {
+      reasons.add('Matched total keyword');
+    } else if (lower.contains('amount')) {
+      reasons.add('Matched amount keyword');
+    }
     if (lower.contains('total')) reasons.add('Matched total keyword');
     if (lower.contains('amount') || lower.contains('payable')) {
       reasons.add('Matched amount/payable keyword');
@@ -540,38 +877,40 @@ class OCRService {
     return reasons;
   }
 
-  static DateTime extractDate(String text) {
-    final regex = RegExp(
-      r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
-    );
-    final match = regex.firstMatch(text);
+  static DateTime? extractDate(String text) {
+    final lines = text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
 
-    if (match != null) {
-      final raw = match.group(0)!;
-      final direct = DateTime.tryParse(raw);
-      if (direct != null) {
-        return direct;
-      }
+    DateTime? bestDate;
+    var bestScore = -1;
 
-      const formats = [
-        'dd/MM/yyyy',
-        'dd-MM-yyyy',
-        'dd/MM/yy',
-        'dd-MM-yy',
-        'MM/dd/yyyy',
-        'MM-dd-yyyy',
-        'yyyy-MM-dd',
-        'yyyy/MM/dd',
-      ];
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      final lineScoreBase = math.max(0, 50 - (index * 4));
 
-      for (final format in formats) {
-        try {
-          return DateFormat(format).parseStrict(raw);
-        } catch (_) {}
+      for (final candidate in _extractDateCandidatesFromLine(line)) {
+        final parsed = _parseBillDate(candidate);
+        if (parsed == null) {
+          continue;
+        }
+
+        var score = lineScoreBase;
+        final lower = line.toLowerCase();
+        if (lower.contains('date')) score += 40;
+        if (lower.contains('invoice')) score -= 8;
+        if (lower.contains('due')) score -= 12;
+
+        if (score > bestScore) {
+          bestDate = parsed;
+          bestScore = score;
+        }
       }
     }
 
-    return DateTime.now();
+    return bestDate;
   }
 
   static String extractMerchant(String text) {
@@ -586,66 +925,220 @@ class OCRService {
       'invoice',
       'bill',
       'receipt',
+      'payment completed',
+      'completed successfully',
+      'transaction information',
+      'uploaded successfully',
       'gst',
       'phone',
       'mobile',
       'date',
     ];
 
-    for (final line in lines.take(5)) {
+    final candidates = <String, int>{};
+
+    for (var index = 0; index < math.min(lines.length, 8); index++) {
+      final line = lines[index];
       final lower = line.toLowerCase();
-      if (lower.length < 3) {
+      final normalized = line.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+      if (normalized.length < 3 || normalized.length > 48) {
         continue;
       }
       if (blockedWords.any(lower.contains)) {
         continue;
       }
-      if (RegExp(r'\d{4,}').hasMatch(line)) {
+      if (RegExp(r'\d{4,}').hasMatch(normalized)) {
         continue;
       }
-      return line;
+      if (RegExp(r'^[\W_]+$').hasMatch(normalized)) {
+        continue;
+      }
+      if (RegExp(r'^(cash|card|upi|qty|rate)\b', caseSensitive: false)
+          .hasMatch(normalized)) {
+        continue;
+      }
+
+      var score = 100 - (index * 10);
+      if (!RegExp(r'\d').hasMatch(normalized)) {
+        score += 25;
+      }
+      if (RegExp(
+        r'\b(restaurant|resto|cafe|store|mart|supermarket|medical|pharmacy|hotel|traders|enterprises|bakers|foods?)\b',
+        caseSensitive: false,
+      ).hasMatch(normalized)) {
+        score += 30;
+      }
+      if (normalized == normalized.toUpperCase()) {
+        score += 10;
+      }
+      if (normalized.split(' ').length <= 5) {
+        score += 8;
+      }
+
+      candidates[normalized] = score;
     }
 
-    return lines.isNotEmpty ? lines.first : 'Unknown';
+    if (candidates.isEmpty) {
+      return 'Unknown';
+    }
+
+    final sorted = candidates.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.first.key;
   }
 
-  static String detectCategory(String merchant) {
-    final normalized = merchant.toLowerCase();
+  static String detectCategory(String merchant, {String text = ''}) {
+    final normalized = '$merchant\n$text'.toLowerCase();
 
     if (normalized.contains('restaurant') ||
         normalized.contains('hotel') ||
-        normalized.contains('cafe')) {
+        normalized.contains('cafe') ||
+        normalized.contains('swiggy') ||
+        normalized.contains('zomato')) {
       return 'Food';
     }
     if (normalized.contains('uber') ||
         normalized.contains('ola') ||
-        normalized.contains('taxi')) {
-      return 'Travel';
+        normalized.contains('taxi') ||
+        normalized.contains('auto') ||
+        normalized.contains('metro')) {
+      return 'Transport';
     }
     if (normalized.contains('mart') ||
         normalized.contains('store') ||
-        normalized.contains('supermarket')) {
+        normalized.contains('supermarket') ||
+        normalized.contains('grocery') ||
+        normalized.contains('hypermarket')) {
       return 'Grocery';
     }
     if (normalized.contains('college') ||
         normalized.contains('school') ||
-        normalized.contains('university')) {
+        normalized.contains('university') ||
+        normalized.contains('tuition') ||
+        normalized.contains('fee')) {
       return 'Education';
     }
     if (normalized.contains('pharma') ||
         normalized.contains('clinic') ||
-        normalized.contains('hospital')) {
+        normalized.contains('hospital') ||
+        normalized.contains('medical') ||
+        normalized.contains('medicine')) {
       return 'Medical';
+    }
+    if (normalized.contains('amazon') ||
+        normalized.contains('flipkart') ||
+        normalized.contains('myntra')) {
+      return 'Shopping';
+    }
+    if (normalized.contains('electricity') ||
+        normalized.contains('water bill') ||
+        normalized.contains('gas bill')) {
+      return 'Utility';
     }
 
     return 'General';
+  }
+
+  static Iterable<String> _extractDateCandidatesFromLine(String line) sync* {
+    final numeric = RegExp(
+      r'\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b',
+      caseSensitive: false,
+    );
+    for (final match in numeric.allMatches(line)) {
+      final value = match.group(0);
+      if (value != null) {
+        yield value;
+      }
+    }
+
+    final withMonth = RegExp(
+      r'\b\d{1,2}(?:st|nd|rd|th)?[\s,-]+(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)[a-z]*[\s,-]+\d{2,4}\b',
+      caseSensitive: false,
+    );
+    for (final match in withMonth.allMatches(line)) {
+      final value = match.group(0);
+      if (value != null) {
+        yield value;
+      }
+    }
+
+    final monthFirst = RegExp(
+      r'\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)[a-z]*[\s,-]+\d{1,2}(?:st|nd|rd|th)?(?:,)?[\s,-]+\d{2,4}\b',
+      caseSensitive: false,
+    );
+    for (final match in monthFirst.allMatches(line)) {
+      final value = match.group(0);
+      if (value != null) {
+        yield value;
+      }
+    }
+  }
+
+  static DateTime? _parseBillDate(String raw) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'(\d)(st|nd|rd|th)\b', caseSensitive: false), r'$1')
+        .replaceAll(',', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    final direct = DateTime.tryParse(cleaned);
+    if (_isValidBillDate(direct)) {
+      return DateTime(direct!.year, direct.month, direct.day);
+    }
+
+    const formats = [
+      'dd/MM/yyyy',
+      'dd-MM-yyyy',
+      'dd/MM/yy',
+      'dd-MM-yy',
+      'MM/dd/yyyy',
+      'MM-dd-yyyy',
+      'MM/dd/yy',
+      'MM-dd-yy',
+      'yyyy-MM-dd',
+      'yyyy/MM/dd',
+      'dd MMM yyyy',
+      'dd MMM yy',
+      'dd MMMM yyyy',
+      'dd MMMM yy',
+      'MMM dd yyyy',
+      'MMMM dd yyyy',
+      'MMM dd yy',
+      'MMMM dd yy',
+    ];
+
+    for (final format in formats) {
+      try {
+        final parsed = DateFormat(format).parseStrict(cleaned);
+        if (_isValidBillDate(parsed)) {
+          return DateTime(parsed.year, parsed.month, parsed.day);
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  static bool _isValidBillDate(DateTime? value) {
+    if (value == null) {
+      return false;
+    }
+
+    final normalized = DateTime(value.year, value.month, value.day);
+    final today = DateTime.now();
+    final latestAllowed = DateTime(today.year, today.month, today.day)
+        .add(const Duration(days: 1));
+
+    return !normalized.isBefore(_minValidBillDate) &&
+        !normalized.isAfter(latestAllowed);
   }
 }
 
 class BillAnalysisResult {
   final String text;
   final AmountExtractionResult amountResult;
-  final DateTime date;
+  final DateTime? date;
   final String merchant;
   final String category;
 
