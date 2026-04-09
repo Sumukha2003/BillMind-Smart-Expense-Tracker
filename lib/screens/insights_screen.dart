@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../models/expense.dart';
 import '../providers/expense_provider.dart';
@@ -125,19 +126,25 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                             value: selectedYear,
                             borderRadius: BorderRadius.circular(16),
                             icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                            items: kYearFilterOptions
-                                .map(
-                                  (year) => DropdownMenuItem<int>(
-                                    value: year,
-                                    child: Text(year.toString()),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (year) {
-                              if (year != null) {
-                                ref.read(selectedYearProvider.notifier).state =
-                                    year;
-                              }
+                            items: ref.watch(yearOptionsProvider).map((year) => DropdownMenuItem<int>(
+                                  value: year,
+                                  child: Text(year.toString()),
+                                )).toList(),
+                            onChanged: (year) async {
+                              if (year == null) return;
+
+                              // persist selection and update provider
+                              ref.read(settingsBoxProvider).put('selectedYear', year);
+                              ref.read(selectedYearProvider.notifier).state = year;
+
+                              // reset any touched slice
+                              setState(() => touchedIndex = -1);
+
+                              // refresh data first so notifier reloads from Hive
+                              await ref.read(expenseNotifierProvider.notifier).refresh();
+
+                              // then notify the notifier about the selected year to apply filters on fresh data
+                              ref.read(expenseNotifierProvider.notifier).setYear(year);
                             },
                           ),
                         ),
@@ -160,36 +167,47 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                   ),
                   child: SizedBox(
                     height: 200,
-                    child: entries.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No insights yet',
-                              style: TextStyle(color: secondaryTextColor),
-                            ),
-                          )
-                        : BarChart(
-                            BarChartData(
-                              barGroups: entries.asMap().entries.map((entry) {
-                                final index = entry.key;
-                                final item = entry.value;
-                                return BarChartGroupData(
-                                  x: index,
-                                  barRods: [
-                                    BarChartRodData(
-                                      toY: item.value,
-                                      color: Color(
-                                        Expense.categoryColors[item.key] ??
-                                            0xFF9E9E9E,
-                                      ),
-                                      width: 16,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                  ],
-                                );
-                              }).toList(),
-                              titlesData: const FlTitlesData(show: true),
-                            ),
-                          ),
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: 140,
+                          child: _buildMonthlyBarChart(context),
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: entries.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    'No insights yet',
+                                    style: TextStyle(color: secondaryTextColor),
+                                  ),
+                                )
+                              : BarChart(
+                                  BarChartData(
+                                    barGroups: entries.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final item = entry.value;
+                                      return BarChartGroupData(
+                                        x: index,
+                                        barRods: [
+                                          BarChartRodData(
+                                            toY: item.value,
+                                            color: Color(
+                                              Expense.categoryColors[item.key] ??
+                                                  0xFF9E9E9E,
+                                            ),
+                                            width: 16,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                        ],
+                                      );
+                                    }).toList(),
+                                    titlesData: const FlTitlesData(show: true),
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 30),
@@ -265,24 +283,44 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                               Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    selectedIndex == -1
-                                        ? 'Total'
-                                        : entries[selectedIndex].key,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    selectedIndex == -1
-                                        ? 'Rs ${total.toStringAsFixed(0)}'
-                                        : 'Rs ${entries[selectedIndex].value.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
+                                  // Use a Builder so we can create a NumberFormat here without affecting the surrounding widget tree
+                                  Builder(builder: (_) {
+                                    final currency = NumberFormat.currency(symbol: '₹', decimalDigits: 0);
+
+                                    if (selectedIndex == -1) {
+                                      return Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text(
+                                            'Total',
+                                            style: TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '(${currency.format(total)})',
+                                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      );
+                                    }
+
+                                    final sel = entries[selectedIndex];
+                                    final percent = total == 0 ? 0 : sel.value / total * 100;
+                                    return Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          sel.key,
+                                          style: const TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${percent.toStringAsFixed(1)}% (${currency.format(sel.value)})',
+                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    );
+                                  }),
                                 ],
                               ),
                             ],
@@ -356,6 +394,27 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMonthlyBarChart(BuildContext context) {
+    final monthly = ref.watch(monthlyTotalsOfYearProvider);
+    final max = monthly.values.fold(0.0, (a, b) => a > b ? a : b);
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: (max * 1.2).clamp(1.0, double.infinity),
+        titlesData: const FlTitlesData(show: true),
+        barGroups: monthly.entries.map((e) {
+          final m = e.key;
+          final val = e.value;
+          return BarChartGroupData(
+            x: m,
+            barRods: [BarChartRodData(toY: val, width: 10, color: Theme.of(context).colorScheme.primary)],
+          );
+        }).toList(),
       ),
     );
   }

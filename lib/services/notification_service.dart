@@ -63,5 +63,24 @@ class NotificationService {
       ),
     );
   }
+
+  /// General purpose immediate notification used as a fallback for alerts.
+  static Future<void> show(String title, String body) async {
+    await _notifications.show(
+      title.hashCode,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'general_alerts',
+          'General Alerts',
+          channelDescription: 'General application alerts',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
+  }
 }
 

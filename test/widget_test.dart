@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 void main() {
   setUpAll(() async {
@@ -21,7 +22,6 @@ void main() {
     Hive.init(tempDir.path);
     Hive.registerAdapter(ExpenseAdapter());
     await Hive.openBox<Expense>('expenses');
-    await Hive.openBox('settings');
   });
 
   testWidgets('Bill Scanner app launches', (WidgetTester tester) async {

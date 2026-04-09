@@ -8,26 +8,53 @@ import 'models/expense.dart';
 import 'screens/home_screen.dart';
 import 'providers/theme_provider.dart';
 import 'firebase_options.dart';
+import 'services/alert_service_new.dart';
+import 'services/firebase_service.dart';
+
+final alertService = AlertServiceNew();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Load ENV
+  /// ENV
   await dotenv.load(fileName: '.env');
 
-  // ✅ Initialize Firebase
+  /// Initialize alert/notification service early
+  await alertService.init();
+
+  /// FIREBASE
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // ✅ Initialize Hive
+  /// HIVE - FIXED CRASH
   await Hive.initFlutter();
   Hive.registerAdapter(ExpenseAdapter());
 
-  await Hive.openBox<Expense>('expenses');
+  // Data persistence enabled - no delete on startup
+
+  // Open fresh boxes
+  final expenseBox = await Hive.openBox<Expense>('expenses');
   await Hive.openBox('settings');
 
-  // ✅ Run app ONLY ONCE
+  // 🔥 AUTO SYNC: Download from Firestore → populate local Hive
+  final downloaded = await FirebaseService.downloadAllExpenses(expenseBox);
+  debugPrint('Startup: Downloaded $downloaded expenses from Firestore');
+
+  // 🚨 STARTUP YEARLY ALERT CHECK
+  final expenses = expenseBox.values.toList();
+  final yearTotals = <int, double>{};
+  for (final exp in expenses) {
+    final yr = exp.date.year;
+    yearTotals[yr] = (yearTotals[yr] ?? 0.0) + exp.amount;
+  }
+  int checkedYears = 0;
+  for (final entry in yearTotals.entries) {
+    await alertService.checkYearlyLimit(year: entry.key, totalAmount: entry.value);
+    checkedYears++;
+  }
+  debugPrint('Startup: Checked $checkedYears years for >₹1L alerts. Year totals: $yearTotals');
+
   runApp(const ProviderScope(child: BillScannerApp()));
 }
 
@@ -42,40 +69,36 @@ class BillScannerApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       title: 'Bill Scanner',
 
+      /// 🔥 FIXED THEME MODE
       themeMode: themeMode,
 
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
         colorSchemeSeed: const Color(0xFF1D9E75),
-        scaffoldBackgroundColor: const Color(0xFFF8F9FA),
-        cardColor: Colors.white,
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
+
+        /// 🔥 GLOBAL CARD STYLE
+        cardTheme: CardThemeData(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
         ),
+
+        scaffoldBackgroundColor: const Color(0xFFF8F9FA),
       ),
 
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
         colorSchemeSeed: const Color(0xFF1D9E75),
-        scaffoldBackgroundColor: const Color(0xFF0A0A0A),
-        cardColor: const Color(0xFF151A18),
-        canvasColor: const Color(0xFF101513),
-        dialogTheme: const DialogThemeData(
-          backgroundColor: Color(0xFF151A18),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF151A18),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
+
+        cardTheme: CardThemeData(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
         ),
+
+        scaffoldBackgroundColor: const Color(0xFF0B0F0E),
       ),
 
       home: const HomeScreen(),

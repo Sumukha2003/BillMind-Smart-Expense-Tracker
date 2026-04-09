@@ -39,9 +39,9 @@ class ExpenseCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E5E5), width: 0.5),
+border: Border.all(color: Theme.of(context).colorScheme.outline, width: 0.5),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -56,10 +56,10 @@ class ExpenseCard extends StatelessWidget {
         ),
         title: Text(
           expense.merchant,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: Color(0xFF1A1A1A),
+            color: Theme.of(context).colorScheme.onSurface,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -85,7 +85,7 @@ class ExpenseCard extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               DateFormat('dd MMM').format(expense.date),
-              style: const TextStyle(fontSize: 11, color: Color(0xFFB4B2A9)),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -94,20 +94,20 @@ class ExpenseCard extends StatelessWidget {
           children: [
             Text(
               'Rs ${NumberFormat('#,##,###.##').format(expense.amount)}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF1A1A1A),
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             if (onDelete != null) ...[
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: onDelete,
-                child: const Icon(
+                child: Icon(
                   Icons.delete_outline,
                   size: 18,
-                  color: Color(0xFFB4B2A9),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ],

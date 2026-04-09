@@ -35,16 +35,20 @@ dependencies:
   # Image Input
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0
+  camera: ^0.10.5+5
 
-  # OCR
+# OCR
   google_mlkit_text_recognition: ^0.13.0
+  # google_mlkit_camera_x: ^0.2.0+8 # TODO: Add for live OCR after camera
+  # Multi-language via latin + scripts (planned)
 
   # Firebase
   firebase_core: ^2.30.0
   firebase_storage: ^11.7.0
   cloud_firestore: ^4.17.0
 
-  # Utils
+# Utils
+  tflite_flutter: ^0.10.4  # Edge AI offline OCR
   crypto: ^3.0.7
   intl: ^0.19.0
   uuid: ^4.4.0
@@ -58,8 +62,13 @@ dependencies:
 
   # Notifications
   flutter_local_notifications: ^17.1.2
+  shared_preferences: ^2.2.2
   pdf_render_plus: 1.4.16
   image: ^4.8.0
+
+  # Email (SMTP)
+  mailer: ^6.2.7
+  logger: ^2.4.0
 
 dev_dependencies:
   flutter_test:

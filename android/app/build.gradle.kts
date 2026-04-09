@@ -26,8 +26,7 @@ android {
     defaultConfig {
         applicationId = "com.example.bill_scanner_app"
 
-        // ⚠️ IMPORTANT: ensure minSdk >= 21
-        minSdk = flutter.minSdkVersion
+        minSdk = 26
 
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

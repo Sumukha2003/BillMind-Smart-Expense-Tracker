@@ -56,6 +56,21 @@ class Expense extends HiveObject {
   @HiveField(10)
   String month; // for analytics
 
+  @HiveField(11)
+  Map<String, double> gstBreakdown; // CGST/SGST/IGST/subtotal
+
+  @HiveField(12)
+  double fraudScore; // 0-1 risk score
+
+  @HiveField(13)
+  List<Map<String, dynamic>> items;
+
+@HiveField(14)
+  bool highValueAlertSent;
+
+  @HiveField(15)
+  bool isSynced = false;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -64,12 +79,16 @@ class Expense extends HiveObject {
     required this.date,
     required this.imagePath,
     this.firebaseUrl = '',
-
-    // ✅ DEFAULT VALUES (IMPORTANT for compatibility)
+    this.highValueAlertSent = false,
+    Map<String, double>? gstBreakdown,
+    List<Map<String, dynamic>>? items,
+    this.fraudScore = 0.0,
     this.paymentMethod = 'Unknown',
     this.isDuplicate = false,
     this.vendorType = 'General',
     String? month,
-  }) : month = month ??
-            "${date.month.toString().padLeft(2, '0')}-${date.year}";
+  })  : gstBreakdown = gstBreakdown ?? {'cgst': 0.0, 'sgst': 0.0, 'igst': 0.0, 'subtotal': 0.0},
+        month = month ?? "${date.month.toString().padLeft(2, '0')}-${date.year}",
+        items = items ?? [];
 }
+

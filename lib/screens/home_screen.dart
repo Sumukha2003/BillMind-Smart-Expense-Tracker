@@ -1,13 +1,15 @@
-import 'package:fl_chart/fl_chart.dart';
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-
 import '../models/expense.dart';
 import '../providers/expense_provider.dart';
 import '../providers/theme_provider.dart';
-import 'insights_screen.dart';
-import 'scanner_screen.dart';
+import '../screens/scanner_screen.dart';
+import '../screens/insights_screen.dart';
+import '../services/alert_service_new.dart';
+import '../widgets/expense_pie_chart.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -17,7 +19,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  static const _months = [
+  final months = [
     'All',
     'Jan',
     'Feb',
@@ -30,566 +32,388 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     'Sep',
     'Oct',
     'Nov',
-    'Dec',
+    'Dec'
   ];
-
-  String searchQuery = '';
-  String selectedMonth = 'All';
-
-  Future<void> _refreshExpenses() async {
-    ref.read(expenseNotifierProvider.notifier).refresh();
-    setState(() {});
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-  }
-
-  Widget _chip(String label, bool isDark) {
-    final isSelected = selectedMonth == label;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(
-          label,
-          style: TextStyle(
-            color: isSelected
-                ? const Color(0xFF145D4A)
-                : (isDark ? const Color(0xFFB8C3BE) : const Color(0xFF5F6F69)),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        selected: isSelected,
-        selectedColor: const Color(0xFF1D9E75).withValues(alpha: 0.16),
-        backgroundColor: isDark ? const Color(0xFF151A18) : Colors.white,
-        side: BorderSide(
-          color: isDark ? const Color(0xFF2A3430) : const Color(0xFFE2ECE7),
-        ),
-        onSelected: (_) => setState(() => selectedMonth = label),
-      ),
-    );
-  }
-
-  Widget _yearDropdown({
-    required BuildContext context,
-    required bool isDark,
-    required int selectedYear,
-  }) {
-    final borderColor = isDark
-        ? const Color(0xFF2A3430)
-        : const Color(0xFFE3ECE7);
-    final fillColor = isDark ? const Color(0xFF151A18) : Colors.white;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: fillColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value: selectedYear,
-          borderRadius: BorderRadius.circular(16),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded),
-          items: kYearFilterOptions
-              .map(
-                (year) => DropdownMenuItem<int>(
-                  value: year,
-                  child: Text(year.toString()),
-                ),
-              )
-              .toList(),
-          onChanged: (year) {
-            if (year != null) {
-              ref.read(selectedYearProvider.notifier).state = year;
-            }
-          },
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    final themeMode = ref.watch(themeProvider);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final selectedYear = ref.watch(selectedYearProvider);
-    final allExpenses = ref.watch(expenseNotifierProvider);
-    final surfaceColor = isDark ? const Color(0xFF151A18) : Colors.white;
-    final subtleSurfaceColor = isDark
-        ? const Color(0xFF101513)
-        : const Color(0xFFF9FCFB);
-    final borderColor = isDark
-        ? const Color(0xFF2A3430)
-        : const Color(0xFFE3ECE7);
-    final secondaryTextColor = isDark
-        ? const Color(0xFFB6C2BD)
-        : const Color(0xFF6B7B76);
-    final expenses = allExpenses.where((expense) {
-      final matchesSearch = expense.merchant
-          .toLowerCase()
-          .contains(searchQuery.toLowerCase());
-      final matchesYear = expense.date.year == selectedYear;
-      final matchesMonth = selectedMonth == 'All' ||
-          DateFormat('MMM').format(expense.date) == selectedMonth;
-      return matchesSearch && matchesYear && matchesMonth;
-    }).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
+    // Watch expense list (already filtered inside ExpenseNotifier)
+    final expenses = ref.watch(expenseNotifierProvider);
 
-    final total = expenses.fold<double>(0.0, (sum, e) => sum + e.amount);
-    final categoryTotals = <String, double>{};
-    for (final expense in expenses) {
-      categoryTotals[expense.category] =
-          (categoryTotals[expense.category] ?? 0) + expense.amount;
-    }
+    // Watch selected filters (kept in sync with notifier when user updates)
+    final selectedMonth = ref.watch(selectedMonthProvider);
 
-    final topCategory = categoryTotals.entries.isEmpty
-        ? 'General'
-        : categoryTotals.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
-    final overviewLabel = selectedMonth == 'All'
-        ? '$selectedYear at a glance'
-        : '$selectedMonth $selectedYear';
+    // Totals for header and pie chart
+    final yearExpenses = ref.watch(selectedYearExpensesProvider);
+    final monthExpenses = ref.watch(monthlyExpensesProvider);
+
+    final headerExpenses = selectedMonth == 'All' ? yearExpenses : monthExpenses;
+    final headerTotal = headerExpenses.fold<double>(0, (s, e) => s + e.amount);
+
+    // Category totals: if month == All show year totals, else show selected month totals
+    final categoryTotals = selectedMonth == 'All'
+        ? ref.watch(allCategoryTotalsProvider)
+        : ref.watch(categoryTotalsProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bill Scanner'),
+        title: const Text("Bill Scanner"),
         actions: [
           IconButton(
             icon: Icon(
-              themeMode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode,
+              ref.watch(themeProvider) == ThemeMode.dark
+                  ? Icons.dark_mode
+                  : Icons.light_mode,
             ),
-            onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshExpenses,
+            onPressed: () {
+              ref.read(themeProvider.notifier).toggleTheme();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.insights),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const InsightsScreen()),
-            ),
+            tooltip: 'Insights',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const InsightsScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () async {
+              await ref.read(expenseNotifierProvider.notifier).refresh();
+              if (!mounted) return;
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Refreshed')),
+              );
+            },
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const ScannerScreen()),
-        ),
-        backgroundColor: const Color(0xFF1D9E75),
-        icon: const Icon(Icons.camera_alt),
-        label: const Text('Scan Bill'),
-      ),
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? const [Color(0xFF0A0A0A), Color(0xFF111715)]
-                : const [Color(0xFFF4FBF8), Color(0xFFFFFFFF)],
-          ),
-        ),
-        child: RefreshIndicator(
-          onRefresh: _refreshExpenses,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-            children: [
-              Container(
-                padding: const EdgeInsets.all(22),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF1D9E75), Color(0xFF155E51)],
-                  ),
-                  boxShadow: isDark
-                      ? const []
-                      : const [
-                          BoxShadow(
-                            color: Color(0x1F1D9E75),
-                            blurRadius: 24,
-                            offset: Offset(0, 12),
-                          ),
-                        ],
+
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await ref.read(expenseNotifierProvider.notifier).refresh();
+        },
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+
+            /// 🔥 SUMMARY CARD
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1D9E75), Color(0xFF146B59)],
                 ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(selectedMonth == 'All' ? 'This Year at a glance' : 'Selected Month at a glance',
+                      style: const TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 8),
+                  Text(
+                    "₹ ${headerTotal.toStringAsFixed(0)}",
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "${headerExpenses.length} expenses in the current view",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            /// 🥧 PIE CHART
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Icon(
-                            Icons.insights_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(
-                            '$topCategory focus',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      overviewLabel,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Rs ${total.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 34,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${expenses.length} expense${expenses.length == 1 ? '' : 's'} in the current view',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.88),
-                      ),
-                    ),
+                    Text('Category Breakdown', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    if (categoryTotals.isNotEmpty)
+                      ExpensePieChart(data: categoryTotals)
+                    else
+                      const Text('No data'),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: surfaceColor,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: borderColor),
-                ),
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search by merchant...',
-                    prefixIcon: const Icon(Icons.search),
-                    fillColor: subtleSurfaceColor,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  onChanged: (value) => setState(() => searchQuery = value),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: surfaceColor,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: borderColor),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.calendar_month_rounded,
-                      color: Color(0xFF1D9E75),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
+            ),
+
+            const SizedBox(height: 12),
+            // Show concise insights at top only when viewing a year (month == 'All')
+            if (selectedMonth == 'All')
+              Consumer(
+                builder: (context, ref, _) {
+                  final insights = ref.watch(insightsProvider);
+                  if (insights.isEmpty) return const SizedBox.shrink();
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Year filter',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Switch between 2020 and 2026 to view totals and charts for that bill year.',
-                            style: TextStyle(color: secondaryTextColor),
-                          ),
+                          Text('Insights', style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 8),
+                          ...insights.map((i) => Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Text('• $i'),
+                              )),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    _yearDropdown(
-                      context: context,
-                      isDark: isDark,
-                      selectedYear: selectedYear,
-                    ),
-                  ],
+                  );
+                },
+              ),
+
+            /// 🚨 ALERT CHECK BUTTON
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final expenses = ref.read(expenseNotifierProvider);
+                    await alertService.checkAllYears(expenses);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Checked all yearly limits! 🚨')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.warning, color: Colors.white),
+                  label: const Text('Check Yearly Expense Limits'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ),
-              const SizedBox(height: 14),
-              SizedBox(
-                height: 48,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: _months.map((month) => _chip(month, isDark)).toList(),
+            ),
+
+            const SizedBox(height: 20),
+
+            /// 🔍 SEARCH BAR
+            TextField(
+              onChanged: (value) {
+                // Use provider's debounced search
+                ref.read(expenseNotifierProvider.notifier).setSearchQuery(value);
+              },
+              decoration: InputDecoration(
+                hintText: "Search merchant or category...",
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: surfaceColor,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: borderColor),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Spending mix',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Category distribution for the selected month in $selectedYear.',
-                      style: TextStyle(color: secondaryTextColor),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 240,
-                      child: categoryTotals.isEmpty
-                          ? Center(
-                              child: Text(
-                                'No chart data yet',
-                                style: TextStyle(color: secondaryTextColor),
-                              ),
-                            )
-                          : PieChart(
-                              PieChartData(
-                                sectionsSpace: 2,
-                                sections: categoryTotals.entries.map((entry) {
-                                  final color = Color(
-                                    Expense.categoryColors[entry.key] ??
-                                        0xFF9E9E9E,
-                                  );
-                                  return PieChartSectionData(
-                                    color: color,
-                                    value: entry.value,
-                                    title:
-                                        '${entry.key.substring(0, 1)}\nRs ${entry.value.toStringAsFixed(0)}',
-                                    radius: 80,
-                                    titleStyle: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                    ),
-                  ],
-                ),
+            ),
+
+            const SizedBox(height: 20),
+
+            /// 📅 YEAR FILTER
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white12),
               ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: surfaceColor,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: borderColor),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Recent expenses',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${expenses.length} items',
-                          style: TextStyle(
-                            color: secondaryTextColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    if (expenses.isEmpty)
-                      Center(
-                        child: Column(
-                          children: [
-                            const Icon(
-                              Icons.receipt_long_outlined,
-                              size: 72,
-                              color: Color(0xFFB0BBB6),
-                            ),
-                            const SizedBox(height: 14),
-                            Text(
-                              'No expenses added yet',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: secondaryTextColor,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Tap the scan button to add your first bill.',
-                              style: TextStyle(color: secondaryTextColor),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      ...expenses.map(
-                        (expense) => Dismissible(
-                          key: Key(expense.id),
-                          direction: DismissDirection.endToStart,
-                          confirmDismiss: (direction) async {
-                            return await showDialog<bool>(
-                                  context: context,
-                                  builder: (dialogContext) => AlertDialog(
-                                    title: const Text('Delete Expense'),
-                                    content: Text('Delete ${expense.merchant}?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(
-                                          dialogContext,
-                                          false,
-                                        ),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(
-                                          dialogContext,
-                                          true,
-                                        ),
-                                        child: const Text(
-                                          'Delete',
-                                          style: TextStyle(color: Colors.red),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ) ??
-                                false;
-                          },
-                          background: Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
-                            child: const Icon(
-                              Icons.delete,
-                              color: Colors.white,
-                              size: 28,
-                            ),
-                          ),
-                          onDismissed: (_) async {
-                            await ref
-                                .read(expenseNotifierProvider.notifier)
-                                .deleteExpense(expense.id);
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: subtleSurfaceColor,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 24,
-                                  backgroundColor: Color(
-                                    Expense.categoryColors[expense.category] ??
-                                        0xFF1D9E75,
-                                  ).withValues(alpha: 0.16),
-                                  child: Text(
-                                    expense.category[0].toUpperCase(),
-                                    style: TextStyle(
-                                      color: Color(
-                                        Expense.categoryColors[expense.category] ??
-                                            0xFF1D9E75,
-                                      ),
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        expense.merchant,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${expense.category} - ${DateFormat('dd MMM').format(expense.date)}',
-                                        style: TextStyle(
-                                          color: secondaryTextColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'Rs ${expense.amount.toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(
-                                      Expense.categoryColors[expense.category] ??
-                                          0xFF1D9E75,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Year filter"),
+                  Consumer(
+                    builder: (ctx, ref, _) {
+                      final years = ref.watch(yearOptionsProvider);
+                      final val = ref.watch(selectedYearProvider);
+
+                      // Ensure selected value exists in years; if not schedule a safe update
+                      final displayVal = years.contains(val) ? val : (years.isNotEmpty ? years.last : DateTime.now().year);
+                      if (!years.contains(val)) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          // Persist and update providers safely after build
+                          ref.read(settingsBoxProvider).put('selectedYear', displayVal);
+                          ref.read(selectedYearProvider.notifier).state = displayVal;
+                          ref.read(expenseNotifierProvider.notifier).setYear(displayVal);
+                        });
+                      }
+
+                      return DropdownButton<int>(
+                        value: displayVal,
+                        items: years
+                            .map((y) => DropdownMenuItem(
+                                  value: y,
+                                  child: Text("$y"),
+                                ))
+                            .toList(),
+                        onChanged: (value) async {
+                          if (value == null) return;
+
+                          // persist selection and update providers
+                          ref.read(settingsBoxProvider).put('selectedYear', value);
+                          ref.read(selectedYearProvider.notifier).state = value;
+                          // refresh data first so notifier loads fresh expenses
+                          await ref.read(expenseNotifierProvider.notifier).refresh();
+
+                          // then update notifier so filters are applied on fresh data
+                          ref.read(expenseNotifierProvider.notifier).setYear(value);
+                        },
+                      );
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+
+            const SizedBox(height: 16),
+
+            /// 📆 MONTH FILTER
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: months.map((m) {
+                  final isSelected = m == selectedMonth;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(m),
+                      selected: isSelected,
+                      onSelected: (_) async {
+                        // update both central selectedMonthProvider and notifier
+                        ref.read(settingsBoxProvider).put('selectedMonth', m);
+                        ref.read(selectedMonthProvider.notifier).state = m;
+                        ref.read(expenseNotifierProvider.notifier).setMonth(m);
+
+                        // refresh immediately so UI updates for the selected month
+                        await ref.read(expenseNotifierProvider.notifier).refresh();
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            /// 📊 EXPENSE LIST
+            if (expenses.isEmpty)
+              const Center(child: Text("No expenses found")),
+
+            ...expenses.map((e) => Dismissible(
+              key: Key(e.id),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                alignment: Alignment.centerRight,
+                color: Colors.red,
+                child: const Icon(Icons.delete, color: Colors.white),
+              ),
+              confirmDismiss: (_) async {
+                final res = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete expense?'),
+                    content: Text('Remove "${e.merchant}"?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                    ],
+                  ),
+                );
+                return res ?? false;
+              },
+              onDismissed: (_) async {
+                final deleted = e;
+                await ref.read(expenseNotifierProvider.notifier).deleteExpense(e.id);
+
+                if (!mounted) return;
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: const Text('Expense deleted permanently (local + cloud)'),
+                    action: SnackBarAction(
+                      label: 'UNDO',
+                      onPressed: () async {
+                        // restore
+                        await ref.read(expenseNotifierProvider.notifier).addExpense(deleted);
+                      },
+                    ),
+                  ),
+                );
+              },
+              child: _buildExpenseTile(e),
+            )),
+          ],
+        ),
+      ),
+
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => const ScannerScreen(),
+            ),
+          );
+        },
+        label: const Text("Scan Bill"),
+        icon: const Icon(Icons.camera_alt),
+      ),
+    );
+  }
+
+  Widget _buildExpenseTile(Expense e) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Text(e.category[0]),
+        ),
+        title: Text(e.merchant),
+        subtitle: Text(
+          "${e.category} • ${DateFormat('dd MMM').format(e.date)}",
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "₹ ${e.amount.toStringAsFixed(0)}",
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete expense?'),
+                    content: Text('Remove "${e.merchant}"?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                    ],
+                  ),
+                );
+
+                if (confirm ?? false) {
+                  await ref.read(expenseNotifierProvider.notifier).deleteExpense(e.id);
+                }
+              },
+            ),
+          ],
         ),
       ),
     );
   }
 }
+

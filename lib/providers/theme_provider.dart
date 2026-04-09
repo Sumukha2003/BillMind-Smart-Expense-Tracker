@@ -8,34 +8,24 @@ final themeProvider =
 });
 
 class ThemeNotifier extends StateNotifier<ThemeMode> {
-  ThemeNotifier() : super(ThemeMode.light) {
-    _loadTheme();
+  ThemeNotifier() : super(ThemeMode.dark) {
+    _load();
   }
 
-  late final Box _box;
 
-  void _initBox() {
-    _box = Hive.box('settings');
-  }
 
   void toggleTheme() {
-    if (state == ThemeMode.dark) {
-      state = ThemeMode.light;
-      _box.put('theme', 'light');
-    } else {
-      state = ThemeMode.dark;
-      _box.put('theme', 'dark');
-    }
+    final box = Hive.box('settings');
+    final isDark = state == ThemeMode.dark;
+
+    state = isDark ? ThemeMode.light : ThemeMode.dark;
+
+    box.put('darkMode', !isDark);
   }
 
-  void _loadTheme() {
-    _initBox();
-    final saved = _box.get('theme');
-
-    if (saved == 'dark') {
-      state = ThemeMode.dark;
-    } else {
-      state = ThemeMode.light;
-    }
+  void _load() {
+    final box = Hive.box('settings');
+    final isDark = box.get('darkMode', defaultValue: true);
+    state = isDark ? ThemeMode.dark : ThemeMode.light;
   }
 }
